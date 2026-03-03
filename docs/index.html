@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bulk Square Beta</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>Bulk Square (Beta)</h1>
+      <p>Convierte múltiples imágenes a cuadrado con padding de color y elige cómo descargarlas.</p>
+    </header>
+
+    <div class="layout">
+      <section class="card config-card">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button"
+          aria-label="Arrastra imágenes aquí o haz click para seleccionar">
+          <div class="dz-inner">
+            <div class="dz-title">Arrastra y suelta imágenes aquí</div>
+            <div class="dz-sub">o haz click para seleccionarlas (se agregan a la lista)</div>
+          </div>
+          <input id="fileInput" type="file" accept="image/*" multiple hidden />
+        </div>
+
+        <div class="row">
+          <div class="stat">
+            <div class="stat-label">Archivos seleccionados</div>
+            <div id="fileCount" class="stat-value">0</div>
+          </div>
+          <div class="stat small">
+            <div class="stat-label">Tamaño total aprox.</div>
+            <div id="totalSize" class="stat-value">0 MB</div>
+          </div>
+        </div>
+
+        <div class="form">
+          <label class="field">
+            <span>Padding (HEX)</span>
+            <div class="inline">
+              <input id="colorPicker" type="color" value="#ffffff" />
+              <input id="colorHex" type="text" value="#ffffff" maxlength="7" />
+            </div>
+            <small class="hint">Ej: #ffffff</small>
+          </label>
+
+          <label class="field">
+            <span>Formato salida</span>
+            <select id="formatSelect" data-cselect>
+              <option value="png">PNG</option>
+              <option value="jpg">JPG</option>
+              <option value="webp">WebP</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Tamaño final</span>
+            <div class="inline">
+              <select id="sizeMode" data-cselect>
+                <option value="auto">Auto (max lado)</option>
+                <option value="fixed">Numérico</option>
+              </select>
+              <div id="sizeValueWrap" class="size-value-wrap">
+                <input id="sizeValue" type="number" min="1" max="10000" step="1" value="1080" />
+              </div>
+            </div>
+            <small class="hint">Auto usa el lado mayor original. Numérico fuerza el lado del cuadrado final.</small>
+          </label>
+
+          <label class="field">
+            <span>Margen vertical (px)</span>
+            <input id="marginY" type="number" min="0" max="10000" step="1" value="0" />
+            <small class="hint">Agrega espacio arriba y abajo después del square (se rellena con el mismo
+              color).</small>
+          </label>
+
+          <label class="field">
+            <span>Modo de descarga</span>
+            <select id="downloadMode" data-cselect>
+              <option value="zip">ZIP (recomendado)</option>
+              <option value="folder">Carpeta</option>
+              <option value="separate">Archivos por separado</option>
+            </select>
+            <small class="hint">Carpeta descarga un ZIP que contiene una carpeta estándar (se guarda en tu carpeta de
+              Descargas).</small>
+          </label>
+
+          <label class="toggle">
+            <input id="autoClean" type="checkbox" checked />
+            <span>Limpiar automáticamente después de descargar</span>
+          </label>
+
+          <div class="actions">
+            <button id="processBtn" class="primary" disabled>Procesar</button>
+            <button id="cleanBtn" class="secondary" type="button">Clean</button>
+          </div>
+          <div id="status" class="status" aria-live="polite"></div>
+        </div>
+
+      </section>
+
+      <section class="card preview-card" aria-label="Preview">
+        <div class="preview">
+          <div class="preview-head">
+            <div class="preview-title">Preview</div>
+            <div class="preview-sub">Resultado final de la primera imagen (según el orden actual).</div>
+          </div>
+          <div class="preview-box">
+            <div id="previewPlaceholder" class="preview-placeholder">Sube imágenes para ver el preview.</div>
+            <img id="previewImg" class="preview-img" alt="Preview" />
+          </div>
+        </div>
+
+        <div class="filelist">
+          <div class="filelist-head">
+            <div class="filelist-title">Imágenes</div>
+            <div class="filelist-sub">Arrastra para reordenar o elimina. El orden afecta preview y descargas.</div>
+          </div>
+          <div id="fileList" class="filelist-items"></div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="footer">
+      <a href="/health" target="_blank" rel="noreferrer">health</a>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
