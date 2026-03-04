@@ -147,6 +147,10 @@ body {
   color: rgba(229, 231, 235, 0.92);
 }
 
+.field.is-disabled {
+  opacity: 0.55;
+}
+
 .inline {
   display: flex;
   gap: 10px;
@@ -352,6 +356,10 @@ input[type="color"] {
   color: rgba(229, 231, 235, 0.92);
   font-size: 13px;
   cursor: pointer;
+}
+
+.removebg-toggle {
+  margin-top: -2px;
 }
 
 .toggle-label {

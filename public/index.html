@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bulk Square Beta</title>
   <link rel="stylesheet" href="/styles.css" />
+  <!-- Remove BG feature isolated (temporarily disabled).
+       Re-enable by restoring the importmap and removeBg toggle block. -->
 </head>
 
 <body>
@@ -38,7 +40,7 @@
         </div>
 
         <div class="form">
-          <label class="field">
+          <label id="paddingField" class="field">
             <span>Padding (HEX)</span>
             <div class="inline">
               <input id="colorPicker" type="color" value="#ffffff" />
@@ -46,6 +48,8 @@
             </div>
             <small class="hint">Ej: #ffffff</small>
           </label>
+
+          <!-- Remove BG toggle isolated (temporarily disabled). -->
 
           <label class="field">
             <span>Formato salida</span>

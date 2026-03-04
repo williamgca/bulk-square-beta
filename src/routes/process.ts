@@ -5,6 +5,7 @@ import path from "path";
 import sharp from "sharp";
 
 export const processRouter = Router();
+const REMOVE_BG_FEATURE_ENABLED = false;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -17,6 +18,11 @@ const upload = multer({
 type OutputFormat = "png" | "jpg" | "webp";
 type SizeMode = "auto" | "fixed";
 type DownloadMode = "zip" | "folder";
+
+function parseBool(value: unknown): boolean {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
 
 function isHexColor(value: string): boolean {
   return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
@@ -66,8 +72,9 @@ async function processOneImage(params: {
   sizeMode: SizeMode;
   fixedSize: number | null;
   marginY: number;
+  removeBg: boolean;
 }): Promise<{ outputBuffer: Buffer; squareSize: number; outExt: string; outHeight: number }> {
-  const { input, background, format, sizeMode, fixedSize, marginY } = params;
+  const { input, background, format, sizeMode, fixedSize, marginY, removeBg } = params;
 
   const meta = await sharp(input, { failOnError: false }).metadata();
   const w = meta.width ?? 0;
@@ -104,6 +111,9 @@ async function processOneImage(params: {
   // We explicitly flatten over the chosen background color when alpha is present.
   const hasAlpha = meta.hasAlpha === true;
   const inputIsPng = meta.format === "png";
+  const effectiveBackground = removeBg && format !== "jpg"
+    ? { r: 0, g: 0, b: 0, alpha: 0 }
+    : background;
 
   let pipeline = sharp(input, { failOnError: false })
     .ensureAlpha()
@@ -112,13 +122,17 @@ async function processOneImage(params: {
       height: squareSize,
       fit: "contain",
       position: "center",
-      background
+      background: effectiveBackground
     });
 
   // If it has transparency (common for PNG) we replace the transparent background with the
   // selected fill color to prevent dark/black artifacts.
-  if (hasAlpha && (inputIsPng || format === "jpg" || format === "webp")) {
-    pipeline = pipeline.flatten({ background });
+  if (hasAlpha && !removeBg && (inputIsPng || format === "jpg" || format === "webp")) {
+    pipeline = pipeline.flatten({ background: effectiveBackground });
+  }
+
+  if (hasAlpha && removeBg && format === "jpg") {
+    pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255, alpha: 1 } });
   }
 
   // Stage 1: base square image (already padded to square with selected background color).
@@ -139,7 +153,7 @@ async function processOneImage(params: {
         width: baseSide,
         height: baseSide,
         channels: 4,
-        background
+        background: effectiveBackground
       }
     }).composite([{
       input: squareRaw,
@@ -153,7 +167,7 @@ async function processOneImage(params: {
         width: finalSide,
         height: finalSide,
         channels: 4,
-        background
+        background: effectiveBackground
       }
     }).composite([{
       input: squareBase,
@@ -180,9 +194,10 @@ processRouter.post("/process", upload.array("images"), async (req, res) => {
     const sizeModeRaw = String(req.body.sizeMode || "auto").trim().toLowerCase();
     const sizeRaw = String(req.body.size || "").trim();
     const marginRaw = String(req.body.margin ?? "0").trim();
+    const removeBg = REMOVE_BG_FEATURE_ENABLED && parseBool(req.body.removeBg);
     const downloadMode = parseDownloadMode(req.body.downloadMode);
 
-    if (!isHexColor(colorRaw)) {
+    if (!removeBg && !isHexColor(colorRaw)) {
       return res.status(400).json({ error: "Invalid color. Use HEX like #ffffff or #fff." });
     }
 
@@ -205,7 +220,7 @@ processRouter.post("/process", upload.array("images"), async (req, res) => {
       fixedSize = Math.round(n);
     }
 
-    const background = hexToRgb(colorRaw);
+    const background = isHexColor(colorRaw) ? hexToRgb(colorRaw) : hexToRgb("#ffffff");
 
     const marginY = Math.max(0, Math.round(Number(marginRaw) || 0));
     if (!Number.isFinite(marginY) || marginY < 0 || marginY > 10000) {
@@ -261,7 +276,8 @@ processRouter.post("/process", upload.array("images"), async (req, res) => {
         format,
         sizeMode,
         fixedSize,
-        marginY
+        marginY,
+        removeBg
       });
 
       const baseName = sanitizeBaseName(cleanName);
@@ -294,6 +310,7 @@ processRouter.post("/process-single", upload.single("image"), async (req, res) =
     const sizeModeRaw = String(req.body.sizeMode || "auto").trim().toLowerCase();
     const sizeRaw = String(req.body.size || "").trim();
     const marginRaw = String(req.body.margin ?? "0").trim();
+    const removeBg = REMOVE_BG_FEATURE_ENABLED && parseBool(req.body.removeBg);
 
     const orderRaw = String(req.body.order || "").trim();
     const orderTotalRaw = String(req.body.orderTotal || "").trim();
@@ -301,7 +318,7 @@ processRouter.post("/process-single", upload.single("image"), async (req, res) =
     const orderTotal = Math.max(order, Number(orderTotalRaw) || order);
     const padLen = String(orderTotal).length;
 
-    if (!isHexColor(colorRaw)) {
+    if (!removeBg && !isHexColor(colorRaw)) {
       return res.status(400).json({ error: "Invalid color. Use HEX like #ffffff or #fff." });
     }
 
@@ -324,7 +341,7 @@ processRouter.post("/process-single", upload.single("image"), async (req, res) =
       fixedSize = Math.round(n);
     }
 
-    const background = hexToRgb(colorRaw);
+    const background = isHexColor(colorRaw) ? hexToRgb(colorRaw) : hexToRgb("#ffffff");
 
     const marginY = Math.max(0, Math.round(Number(marginRaw) || 0));
     if (!Number.isFinite(marginY) || marginY < 0 || marginY > 10000) {
@@ -337,7 +354,8 @@ processRouter.post("/process-single", upload.single("image"), async (req, res) =
       format,
       sizeMode,
       fixedSize,
-      marginY
+      marginY,
+      removeBg
     });
 
     const { cleanName } = extractClientOrderMarker(file.originalname);

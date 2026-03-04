@@ -1,4 +1,7 @@
 (() => {
+  // Feature isolated for future use. Keep false for current optimal performance.
+  const REMOVE_BG_FEATURE_ENABLED = false;
+
   const dropzone = document.getElementById("dropzone");
   const fileInput = document.getElementById("fileInput");
   const fileCount = document.getElementById("fileCount");
@@ -9,6 +12,8 @@
 
   const colorPicker = document.getElementById("colorPicker");
   const colorHex = document.getElementById("colorHex");
+  const paddingField = document.getElementById("paddingField");
+  const removeBgToggle = document.getElementById("removeBg");
   const formatSelect = document.getElementById("formatSelect");
   const sizeMode = document.getElementById("sizeMode");
   const sizeValue = document.getElementById("sizeValue");
@@ -27,10 +32,11 @@
 
   /**
    * Each item:
-   * { id: string, file: File, url: string }
+   * { id: string, file: File, url: string, removeBgFile?: File | null }
    */
   let items = [];
   let idSeq = 0;
+  let removeBgModulePromise = null;
 
   function uid() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -76,6 +82,46 @@
     const ext = fmt === "jpg" ? "jpg" : fmt;
     const m = Number(marginY) > 0 ? `_my${Number(marginY)}` : "";
     return `${prefix}_${base}_square${m}.${ext}`;
+  }
+
+  function updatePaddingUIState() {
+    const isRemoveBgOn = REMOVE_BG_FEATURE_ENABLED && !!(removeBgToggle && removeBgToggle.checked);
+    if (colorPicker) colorPicker.disabled = isRemoveBgOn;
+    if (colorHex) colorHex.disabled = isRemoveBgOn;
+    if (paddingField) paddingField.classList.toggle("is-disabled", isRemoveBgOn);
+  }
+
+  async function getRemoveBackgroundFn() {
+    if (!removeBgModulePromise) {
+      removeBgModulePromise = import("@imgly/background-removal");
+    }
+    try {
+      const mod = await removeBgModulePromise;
+      const fn = mod.default || mod.removeBackground;
+      if (typeof fn !== "function") throw new Error("removeBackground export not found");
+      return fn;
+    } catch (e) {
+      removeBgModulePromise = null;
+      throw new Error("No se pudo cargar el motor de remover background.");
+    }
+  }
+
+  async function getEffectiveFile(item, settings) {
+    if (!settings || !settings.removeBg) return item.file;
+    if (item.removeBgFile instanceof File) return item.removeBgFile;
+
+    const removeBackground = await getRemoveBackgroundFn();
+    const resultBlob = await removeBackground(item.file, {
+      output: {
+        format: "image/png",
+        quality: 1,
+        type: "foreground"
+      }
+    });
+
+    const base = sanitizeBaseName(item.file.name || "image");
+    item.removeBgFile = new File([resultBlob], `${base}_nobg.png`, { type: "image/png" });
+    return item.removeBgFile;
   }
 
   function parseFilenameFromContentDisposition(header) {
@@ -126,8 +172,9 @@
   }
 
   function getSettingsOrThrow() {
+    const removeBg = REMOVE_BG_FEATURE_ENABLED && !!(removeBgToggle && removeBgToggle.checked);
     const color = String(colorHex.value || "").trim().toLowerCase();
-    if (!isHex(color)) throw new Error("Color inválido. Usa HEX tipo #ffffff.");
+    if (!removeBg && !isHex(color)) throw new Error("Color inválido. Usa HEX tipo #ffffff.");
 
     const fmt = formatSelect.value;
     const mode = sizeMode.value;
@@ -146,29 +193,33 @@
     const dl = (downloadMode && downloadMode.value) ? downloadMode.value : "separate";
     const shouldAutoClean = !!(autoClean && autoClean.checked);
 
-    return { color, fmt, mode, size, marginY, dl, shouldAutoClean };
+    return { color, fmt, mode, size, marginY, dl, shouldAutoClean, removeBg };
   }
 
-  function appendCommonFields(fd, { color, fmt, mode, size, marginY }) {
+  function appendCommonFields(fd, { color, fmt, mode, size, marginY, removeBg }) {
     fd.append("color", color);
     fd.append("format", fmt);
     fd.append("sizeMode", mode);
     if (mode === "fixed") fd.append("size", String(size));
     fd.append("margin", String(marginY || 0));
+    fd.append("removeBg", removeBg ? "1" : "0");
   }
 
-  async function fetchZip({ color, fmt, mode, size, marginY, zipMode }) {
+  async function fetchZip({ color, fmt, mode, size, marginY, zipMode, removeBg }) {
     const fd = new FormData();
 
     // Add an order marker to the multipart filename so the server can enforce
     // a stable order even if the upload order changes in transit.
     const padLen = String(items.length).length;
-    items.forEach((it, idx) => {
+    for (let idx = 0; idx < items.length; idx++) {
+      const it = items[idx];
       const prefix = String(idx + 1).padStart(padLen, "0");
-      fd.append("images", it.file, `__o${prefix}__${it.file.name}`);
-    });
+      if (removeBg) setStatus(`Removiendo fondo… ${idx + 1}/${items.length}`);
+      const fileForUpload = await getEffectiveFile(it, { removeBg });
+      fd.append("images", fileForUpload, `__o${prefix}__${fileForUpload.name}`);
+    }
 
-    appendCommonFields(fd, { color, fmt, mode, size, marginY });
+    appendCommonFields(fd, { color, fmt, mode, size, marginY, removeBg });
     fd.append("downloadMode", zipMode);
 
     const resp = await fetch("/api/process", { method: "POST", body: fd });
@@ -184,10 +235,10 @@
     return await resp.blob();
   }
 
-  async function fetchSingle({ file, color, fmt, mode, size, marginY, order, orderTotal }) {
+  async function fetchSingle({ file, color, fmt, mode, size, marginY, order, orderTotal, removeBg }) {
     const fd = new FormData();
     fd.append("image", file, file.name);
-    appendCommonFields(fd, { color, fmt, mode, size, marginY });
+    appendCommonFields(fd, { color, fmt, mode, size, marginY, removeBg });
     fd.append("order", String(order));
     fd.append("orderTotal", String(orderTotal));
 
@@ -207,7 +258,7 @@
     return { blob, filename };
   }
 
-  async function prefetchSingles({ color, fmt, mode, size, marginY, concurrency }) {
+  async function prefetchSingles({ color, fmt, mode, size, marginY, concurrency, removeBg }) {
     const total = items.length;
     const results = new Array(total);
     let next = 0;
@@ -221,15 +272,17 @@
         next += 1;
         if (i >= total) return;
 
+        const fileForUpload = await getEffectiveFile(items[i], { removeBg });
         const { blob, filename } = await fetchSingle({
-          file: items[i].file,
+          file: fileForUpload,
           color,
           fmt,
           mode,
           size,
           marginY,
           order: i + 1,
-          orderTotal: total
+          orderTotal: total,
+          removeBg
         });
 
         results[i] = { blob, filename };
@@ -470,7 +523,7 @@
 
     incoming.forEach((file) => {
       const url = URL.createObjectURL(file);
-      items.push({ id: uid(), file, url });
+      items.push({ id: uid(), file, url, removeBgFile: null });
     });
 
     updateCounters();
@@ -535,15 +588,23 @@
     setPreviewState({ text: "Generando preview…", hasImage: false });
 
     try {
+      const previewFile = settings.removeBg
+        ? await (async () => {
+          setPreviewState({ text: "Removiendo fondo para preview…", hasImage: false });
+          return await getEffectiveFile(items[0], settings);
+        })()
+        : items[0].file;
+
       const { blob } = await fetchSingle({
-        file: items[0].file,
+        file: previewFile,
         color: settings.color,
         fmt: settings.fmt,
         mode: settings.mode,
         size: settings.size,
         marginY: settings.marginY,
         order: 1,
-        orderTotal: items.length
+        orderTotal: items.length,
+        removeBg: settings.removeBg
       });
 
       if (seq !== previewSeq) return; // stale
@@ -608,6 +669,13 @@
     schedulePreviewUpdate();
   });
 
+  if (removeBgToggle) {
+    removeBgToggle.addEventListener("change", () => {
+      updatePaddingUIState();
+      schedulePreviewUpdate();
+    });
+  }
+
   sizeMode.addEventListener("change", () => {
     updateSizeModeUI();
     schedulePreviewUpdate();
@@ -654,7 +722,8 @@
           mode: settings.mode,
           size: settings.size,
           marginY: settings.marginY,
-          zipMode: "zip"
+          zipMode: "zip",
+          removeBg: settings.removeBg
         });
 
         triggerDownload(blob, "bulk-square-results.zip");
@@ -673,7 +742,8 @@
           mode: settings.mode,
           size: settings.size,
           marginY: settings.marginY,
-          zipMode: "folder"
+          zipMode: "folder",
+          removeBg: settings.removeBg
         });
 
         triggerDownload(blob, "bulk-square-results.zip");
@@ -694,14 +764,15 @@
         setStatus(`Procesando y descargando… ${step}/${total}`);
 
         const r = await fetchSingle({
-          file: items[i].file,
+          file: await getEffectiveFile(items[i], settings),
           color: settings.color,
           fmt: settings.fmt,
           mode: settings.mode,
           size: settings.size,
           marginY: settings.marginY,
           order: i + 1,
-          orderTotal: total
+          orderTotal: total,
+          removeBg: settings.removeBg
         });
 
         const filename = (r && r.filename) ? r.filename : computeFallbackFilename(items[i].file, settings.fmt, i + 1, total, settings.marginY);
@@ -726,6 +797,7 @@
   // ---------- Init ----------
   setStatus("Agrega imágenes para comenzar.");
   setupCustomSelects();
+  updatePaddingUIState();
   updateSizeModeUI();
   updateCounters();
   renderFileList();
