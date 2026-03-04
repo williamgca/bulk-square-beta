@@ -101,6 +101,25 @@
     setTimeout(() => URL.revokeObjectURL(url), 15000);
   }
 
+  function supportsDirectorySave() {
+    return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+  }
+
+  async function saveResultsToDirectory({ directoryHandle, results, fmt, marginY }) {
+    const total = items.length;
+    for (let i = 0; i < total; i++) {
+      const step = i + 1;
+      setStatus(`Guardando archivos… ${step}/${total}`);
+
+      const r = results[i];
+      const filename = (r && r.filename) ? r.filename : computeFallbackFilename(items[i].file, fmt, i + 1, total, marginY);
+      const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(r.blob);
+      await writable.close();
+    }
+  }
+
   function updateCounters() {
     fileCount.textContent = String(items.length);
     const bytes = items.reduce((acc, it) => acc + (it.file ? it.file.size : 0), 0);
@@ -680,6 +699,16 @@
       // - Prefetch concurrently to reduce total time.
       // - Trigger downloads from last → first so the Downloads folder sorted by \"most recent\" shows
       //   the same order the user sees here.
+      let directoryHandle = null;
+      if (supportsDirectorySave()) {
+        try {
+          directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+        } catch (e) {
+          // User canceled or browser denied permission; fallback to regular downloads below.
+          directoryHandle = null;
+        }
+      }
+
       setStatus(`Procesando imágenes… 0/${items.length}`);
       const results = await prefetchSingles({
         color: settings.color,
@@ -691,6 +720,21 @@
       });
 
       const total = items.length;
+
+      if (directoryHandle) {
+        await saveResultsToDirectory({
+          directoryHandle,
+          results,
+          fmt: settings.fmt,
+          marginY: settings.marginY
+        });
+        setStatus("Listo. Archivos guardados en la carpeta seleccionada.", "ok");
+        processBtn.disabled = false;
+
+        if (settings.shouldAutoClean) cleanAll({ silent: true });
+        return;
+      }
+
       setStatus(`Iniciando descargas… 0/${total}`);
 
       for (let i = total - 1; i >= 0; i--) {
