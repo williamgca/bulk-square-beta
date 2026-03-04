@@ -52,7 +52,7 @@
             <select id="formatSelect" data-cselect>
               <option value="png">PNG</option>
               <option value="jpg">JPG</option>
-              <option value="webp">WebP</option>
+              <option value="webp" selected>WebP</option>
             </select>
           </label>
 
@@ -71,10 +71,12 @@
           </label>
 
           <label class="field">
-            <span>Margen vertical (px)</span>
-            <input id="marginY" type="number" min="0" max="10000" step="1" value="0" />
-            <small class="hint">Agrega espacio arriba y abajo después del square (se rellena con el mismo
-              color).</small>
+            <span>Margen (px)</span>
+            <div class="inline margin-inline">
+              <input id="marginY" type="number" min="0" max="10000" step="1" value="0" />
+              <button id="marginClearBtn" class="secondary ghost" type="button">Clear</button>
+            </div>
+            <small class="hint">Agrega espacio uniforme en los 4 lados después del square, manteniendo salida cuadrada.</small>
           </label>
 
           <label class="field">
@@ -82,15 +84,18 @@
             <select id="downloadMode" data-cselect>
               <option value="zip">ZIP (recomendado)</option>
               <option value="folder">Carpeta</option>
-              <option value="separate">Archivos por separado</option>
+              <option value="separate" selected>Archivos por separado</option>
             </select>
             <small class="hint">Carpeta descarga un ZIP que contiene una carpeta estándar (se guarda en tu carpeta de
               Descargas).</small>
           </label>
 
-          <label class="toggle">
-            <input id="autoClean" type="checkbox" checked />
-            <span>Limpiar automáticamente después de descargar</span>
+          <label class="toggle" for="autoClean">
+            <span class="toggle-label">Limpiar automáticamente después de descargar</span>
+            <span class="switch">
+              <input id="autoClean" type="checkbox" checked />
+              <span class="slider" aria-hidden="true"></span>
+            </span>
           </label>
 
           <div class="actions">

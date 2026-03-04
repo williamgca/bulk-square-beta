@@ -86,6 +86,18 @@ async function processOneImage(params: {
 
   const outExt = format === "jpg" ? "jpg" : format;
 
+  async function encodeByFormat(input: Buffer): Promise<Buffer> {
+    let p = sharp(input, { failOnError: false });
+    if (format === "png") {
+      p = p.png({ compressionLevel: 9 });
+    } else if (format === "jpg") {
+      p = p.jpeg({ quality: 90, mozjpeg: true });
+    } else if (format === "webp") {
+      p = p.webp({ quality: 90 });
+    }
+    return await p.toBuffer();
+  }
+
   // NOTE about transparent PNGs:
   // Some transparent images (usually PNGs) can look black/dark after padding or format conversion
   // because alpha gets flattened over black by default or because transparency remains.
@@ -109,38 +121,47 @@ async function processOneImage(params: {
     pipeline = pipeline.flatten({ background });
   }
 
-  if (format === "png") {
-    pipeline = pipeline.png({ compressionLevel: 9 });
-  } else if (format === "jpg") {
-    pipeline = pipeline.jpeg({ quality: 90, mozjpeg: true });
-  } else if (format === "webp") {
-    pipeline = pipeline.webp({ quality: 90 });
-  }
-
-  let outputBuffer = await pipeline.toBuffer();
+  // Stage 1: base square image (already padded to square with selected background color).
+  const squareRaw = await pipeline.png({ compressionLevel: 9 }).toBuffer();
+  let outputBuffer = await encodeByFormat(squareRaw);
 
   const safeMargin = Number.isFinite(marginY) ? Math.max(0, Math.round(marginY)) : 0;
-  const outHeight = squareSize + safeMargin * 2;
+  const squareMeta = await sharp(squareRaw, { failOnError: false }).metadata();
+  const baseW = Math.max(1, Math.round(squareMeta.width || squareSize));
+  const baseH = Math.max(1, Math.round(squareMeta.height || squareSize));
+  const baseSide = Math.max(baseW, baseH);
+  const outHeight = baseSide + safeMargin * 2;
 
-  // Add vertical margin after squaring (keeps width the same; increases height by 2*margin).
+  // Stage 2: apply margin on a guaranteed-square base, then keep final output square.
   if (safeMargin > 0) {
-    let mPipe = sharp(outputBuffer, { failOnError: false }).extend({
-      top: safeMargin,
-      bottom: safeMargin,
-      left: 0,
-      right: 0,
-      background
-    });
+    const squareBase = await sharp({
+      create: {
+        width: baseSide,
+        height: baseSide,
+        channels: 4,
+        background
+      }
+    }).composite([{
+      input: squareRaw,
+      left: Math.floor((baseSide - baseW) / 2),
+      top: Math.floor((baseSide - baseH) / 2)
+    }]).png({ compressionLevel: 9 }).toBuffer();
 
-    if (format === "png") {
-      mPipe = mPipe.png({ compressionLevel: 9 });
-    } else if (format === "jpg") {
-      mPipe = mPipe.jpeg({ quality: 90, mozjpeg: true });
-    } else if (format === "webp") {
-      mPipe = mPipe.webp({ quality: 90 });
-    }
+    const finalSide = baseSide + safeMargin * 2;
+    const withMargin = await sharp({
+      create: {
+        width: finalSide,
+        height: finalSide,
+        channels: 4,
+        background
+      }
+    }).composite([{
+      input: squareBase,
+      left: safeMargin,
+      top: safeMargin
+    }]).png({ compressionLevel: 9 }).toBuffer();
 
-    outputBuffer = await mPipe.toBuffer();
+    outputBuffer = await encodeByFormat(withMargin);
   }
 
   return { outputBuffer, squareSize, outExt, outHeight };
@@ -214,9 +235,8 @@ processRouter.post("/process", upload.array("images"), async (req, res) => {
 
     archive.pipe(res);
 
-    // Some file managers sort extracted files by "date modified".
-    // Make dates identical so visual order is driven by filename prefix (001_, 002_, ...).
-    const fixedZipDate = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
+    // Use ZIP generation time so extracted files have a sensible modified date.
+    const zipGeneratedAt = new Date();
 
     const folderPrefix = downloadMode === "folder" ? "bulk-square-results/" : "";
 
@@ -249,7 +269,7 @@ processRouter.post("/process", upload.array("images"), async (req, res) => {
       const marginSuffix = marginY > 0 ? `_my${marginY}` : "";
       const outName = `${folderPrefix}${orderPrefix}_${baseName}_square_${squareSize}${marginSuffix}.${outExt}`;
 
-      archive.append(outputBuffer, { name: outName, date: fixedZipDate });
+      archive.append(outputBuffer, { name: outName, date: zipGeneratedAt });
     }
 
     await archive.finalize();

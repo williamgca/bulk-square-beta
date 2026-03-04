@@ -14,6 +14,7 @@
   const sizeValue = document.getElementById("sizeValue");
   const sizeValueWrap = document.getElementById("sizeValueWrap");
   const marginYInput = document.getElementById("marginY");
+  const marginClearBtn = document.getElementById("marginClearBtn");
   const downloadMode = document.getElementById("downloadMode");
   const autoClean = document.getElementById("autoClean");
 
@@ -97,27 +98,8 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    // Revoke later (too early can break downloads in some browsers)
-    setTimeout(() => URL.revokeObjectURL(url), 15000);
-  }
-
-  function supportsDirectorySave() {
-    return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
-  }
-
-  async function saveResultsToDirectory({ directoryHandle, results, fmt, marginY }) {
-    const total = items.length;
-    for (let i = 0; i < total; i++) {
-      const step = i + 1;
-      setStatus(`Guardando archivos… ${step}/${total}`);
-
-      const r = results[i];
-      const filename = (r && r.filename) ? r.filename : computeFallbackFilename(items[i].file, fmt, i + 1, total, marginY);
-      const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(r.blob);
-      await writable.close();
-    }
+    // Revoke much later; some browsers queue multi-downloads and may fail if revoked too early.
+    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
   }
 
   function updateCounters() {
@@ -161,7 +143,7 @@
       throw new Error("Margen inválido. Debe ser un número entre 0 y 10000.");
     }
 
-    const dl = (downloadMode && downloadMode.value) ? downloadMode.value : "zip";
+    const dl = (downloadMode && downloadMode.value) ? downloadMode.value : "separate";
     const shouldAutoClean = !!(autoClean && autoClean.checked);
 
     return { color, fmt, mode, size, marginY, dl, shouldAutoClean };
@@ -643,6 +625,13 @@
     schedulePreviewUpdate();
   });
 
+  if (marginClearBtn) {
+    marginClearBtn.addEventListener("click", () => {
+      marginYInput.value = "0";
+      marginYInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
   cleanBtn.addEventListener("click", () => {
     cleanAll();
   });
@@ -695,58 +684,31 @@
         return;
       }
 
-      // 3) Separate downloads (fast):
-      // - Prefetch concurrently to reduce total time.
-      // - Trigger downloads from last → first so the Downloads folder sorted by \"most recent\" shows
-      //   the same order the user sees here.
-      let directoryHandle = null;
-      if (supportsDirectorySave()) {
-        try {
-          directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-        } catch (e) {
-          // User canceled or browser denied permission; fallback to regular downloads below.
-          directoryHandle = null;
-        }
-      }
-
-      setStatus(`Procesando imágenes… 0/${items.length}`);
-      const results = await prefetchSingles({
-        color: settings.color,
-        fmt: settings.fmt,
-        mode: settings.mode,
-        size: settings.size,
-        marginY: settings.marginY,
-        concurrency: 6
-      });
-
+      // 3) Separate downloads:
+      // Process and trigger one-by-one to avoid browser queue/drop issues on very large batches.
       const total = items.length;
-
-      if (directoryHandle) {
-        await saveResultsToDirectory({
-          directoryHandle,
-          results,
-          fmt: settings.fmt,
-          marginY: settings.marginY
-        });
-        setStatus("Listo. Archivos guardados en la carpeta seleccionada.", "ok");
-        processBtn.disabled = false;
-
-        if (settings.shouldAutoClean) cleanAll({ silent: true });
-        return;
-      }
-
-      setStatus(`Iniciando descargas… 0/${total}`);
+      setStatus(`Procesando y descargando… 0/${total}`);
 
       for (let i = total - 1; i >= 0; i--) {
         const step = total - i;
-        setStatus(`Iniciando descargas… ${step}/${total}`);
+        setStatus(`Procesando y descargando… ${step}/${total}`);
 
-        const r = results[i];
+        const r = await fetchSingle({
+          file: items[i].file,
+          color: settings.color,
+          fmt: settings.fmt,
+          mode: settings.mode,
+          size: settings.size,
+          marginY: settings.marginY,
+          order: i + 1,
+          orderTotal: total
+        });
+
         const filename = (r && r.filename) ? r.filename : computeFallbackFilename(items[i].file, settings.fmt, i + 1, total, settings.marginY);
         triggerDownload(r.blob, filename);
 
-        // Small spacing so the browser registers each download, without adding ~1s overhead.
-        await sleep(45);
+        // Give the browser enough time to register each automatic download reliably.
+        await sleep(180);
       }
 
       setStatus("Listo. Descargas iniciadas.", "ok");
