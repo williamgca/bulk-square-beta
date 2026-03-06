@@ -5,7 +5,7 @@ export function createFileListView({ container, formatBytes, onRemove, onMove })
     if (!container) return;
 
     if (!items.length) {
-      container.innerHTML = "<div class=\"file-empty\">No hay imágenes. Agrega algunas para verlas aquí.</div>";
+      container.innerHTML = "<div class=\"file-empty\">No hay imagenes. Agrega algunas para verlas aqui.</div>";
       return;
     }
 
@@ -42,7 +42,8 @@ export function createFileListView({ container, formatBytes, onRemove, onMove })
       const del = document.createElement("button");
       del.type = "button";
       del.className = "iconbtn";
-      del.textContent = "Eliminar";
+      del.textContent = "X";
+      del.setAttribute("aria-label", `Eliminar ${item.file.name}`);
       del.addEventListener("click", (event) => {
         event.preventDefault();
         onRemove(index);

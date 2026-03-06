@@ -41,7 +41,7 @@ function getUiRefs() {
     marginClearBtn: document.getElementById("marginClearBtn"),
     downloadMode: requireElement("downloadMode"),
     autoClean: requireElement("autoClean"),
-    previewCard: document.querySelector(".preview-card"),
+    previewCard: document.querySelector(".preview"),
     previewWrap: document.querySelector(".preview"),
     previewImg: requireElement("previewImg"),
     previewPlaceholder: requireElement("previewPlaceholder"),
