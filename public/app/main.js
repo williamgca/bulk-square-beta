@@ -1,4 +1,4 @@
-import { DOWNLOAD_STEP_DELAY_MS, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from "./config.js";
+import { DOWNLOAD_PARALLEL_REQUESTS, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from "./config.js";
 import { createItemsStore } from "./state/items-store.js";
 import { createBackgroundRemovalService } from "./services/background-removal.js";
 import { createProcessApi } from "./services/api-client.js";
@@ -8,7 +8,7 @@ import { createFileListView } from "./ui/file-list-view.js";
 import { createPreviewController } from "./ui/preview-controller.js";
 import { createStatusView } from "./ui/status-view.js";
 import { computeFallbackFilename } from "./utils/file.js";
-import { bytesToNice, formatMB, sleep } from "./utils/format.js";
+import { bytesToNice, formatMB } from "./utils/format.js";
 import { isHex } from "./utils/validation.js";
 
 function requireElement(id) {
@@ -180,28 +180,51 @@ function getUiRefs() {
   async function downloadSeparate(settings) {
     const items = store.getItems();
     const total = items.length;
+    const maxWorkers = Math.max(1, Math.min(DOWNLOAD_PARALLEL_REQUESTS, total));
+    let completed = 0;
+    let nextDownloadIndex = total - 1;
+    const readyResults = new Map();
     statusView.setStatus(`Procesando y descargando... 0/${total}`);
 
-    for (let i = total - 1; i >= 0; i--) {
-      const step = total - i;
-      statusView.setStatus(`Procesando y descargando... ${step}/${total}`);
-
+    const runOne = async (index) => {
       const result = await api.fetchSingle({
-        file: await backgroundRemovalService.getEffectiveFile(items[i], settings),
+        file: await backgroundRemovalService.getEffectiveFile(items[index], settings),
         color: settings.color,
         format: settings.format,
         sizeMode: settings.sizeMode,
         sizeValue: settings.sizeValue,
         marginY: settings.marginY,
-        order: i + 1,
+        order: index + 1,
         orderTotal: total,
         removeBg: settings.removeBg
       });
 
-      const filename = result.filename || computeFallbackFilename(items[i].file, settings.format, i + 1, total, settings.marginY);
-      triggerDownload(result.blob, filename);
-      await sleep(DOWNLOAD_STEP_DELAY_MS);
-    }
+      readyResults.set(index, result);
+      while (readyResults.has(nextDownloadIndex)) {
+        const ready = readyResults.get(nextDownloadIndex);
+        readyResults.delete(nextDownloadIndex);
+        const filename = ready.filename || computeFallbackFilename(
+          items[nextDownloadIndex].file,
+          settings.format,
+          nextDownloadIndex + 1,
+          total,
+          settings.marginY
+        );
+        triggerDownload(ready.blob, filename);
+        nextDownloadIndex -= 1;
+      }
+
+      completed += 1;
+      statusView.setStatus(`Procesando y descargando... ${completed}/${total}`);
+    };
+
+    const workers = Array.from({ length: maxWorkers }, (_unused, workerIndex) => (async () => {
+      for (let index = workerIndex; index < total; index += maxWorkers) {
+        await runOne(index);
+      }
+    })());
+
+    await Promise.all(workers);
   }
 
   function bindDropzone() {

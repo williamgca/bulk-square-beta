@@ -29,7 +29,7 @@ npm start
 2. Elige color de padding (HEX).
 3. Elige formato de salida (png/jpg/webp).
 4. Elige tamaño final:
-   - **Auto (max lado)**: el tamaño del cuadrado será el lado mayor original.
+   - **Auto (max lado)**: usa el lado mayor original con tope inteligente de 2400px para mantener buena calidad con menor peso.
    - **Numérico** (ej: 1080): el cuadrado final será ese tamaño (la imagen se ajusta con contain).
 5. Click **Procesar** → descarga un ZIP con los resultados.
 

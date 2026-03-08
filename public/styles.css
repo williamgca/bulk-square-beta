@@ -359,11 +359,8 @@ select.cselect-native {
 }
 
 .cselect-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 1200;
   display: none;
   padding: 6px;
   border-radius: 14px;
@@ -374,7 +371,7 @@ select.cselect-native {
   overflow: auto;
 }
 
-.cselect.open .cselect-menu {
+.cselect-menu.open {
   display: block;
 }
 

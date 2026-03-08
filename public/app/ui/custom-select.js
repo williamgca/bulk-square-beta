@@ -29,16 +29,46 @@ function setupCustomSelect(selectEl) {
   menu.setAttribute("role", "listbox");
 
   wrapper.appendChild(trigger);
-  wrapper.appendChild(menu);
+  document.body.appendChild(menu);
+
+  const positionMenu = () => {
+    const rect = trigger.getBoundingClientRect();
+    const viewportH = window.innerHeight || document.documentElement.clientHeight;
+    const gap = 8;
+    const minMenuHeight = 140;
+    const preferredMaxHeight = 260;
+
+    const spaceBelow = Math.max(0, viewportH - rect.bottom - gap);
+    const spaceAbove = Math.max(0, rect.top - gap);
+    const openUp = spaceBelow < minMenuHeight && spaceAbove > spaceBelow;
+    const usableSpace = openUp ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(minMenuHeight, Math.min(preferredMaxHeight, usableSpace - 6));
+
+    menu.style.minWidth = `${Math.round(rect.width)}px`;
+    menu.style.left = `${Math.round(rect.left)}px`;
+    menu.style.top = openUp
+      ? `${Math.round(rect.top - gap)}px`
+      : `${Math.round(rect.bottom + gap)}px`;
+    menu.style.transform = openUp ? "translateY(-100%)" : "none";
+    menu.style.maxHeight = `${Math.round(maxHeight)}px`;
+  };
+
+  const handleViewportChange = () => {
+    if (!wrapper.classList.contains("open")) return;
+    positionMenu();
+  };
 
   const close = () => {
     wrapper.classList.remove("open");
     trigger.setAttribute("aria-expanded", "false");
+    menu.classList.remove("open");
   };
 
   const open = () => {
     wrapper.classList.add("open");
     trigger.setAttribute("aria-expanded", "true");
+    positionMenu();
+    menu.classList.add("open");
   };
 
   const syncLabel = () => {
@@ -84,12 +114,14 @@ function setupCustomSelect(selectEl) {
   });
 
   document.addEventListener("click", (event) => {
-    if (!wrapper.contains(event.target)) close();
+    if (!wrapper.contains(event.target) && !menu.contains(event.target)) close();
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") close();
   });
+  window.addEventListener("resize", handleViewportChange);
+  document.addEventListener("scroll", handleViewportChange, true);
 
   selectEl.addEventListener("change", syncLabel);
 }

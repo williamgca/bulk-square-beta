@@ -35,7 +35,7 @@ export async function processBatchController(req: Request, res: Response): Promi
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=\"bulk-square-results.zip\"");
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = archiver("zip", { zlib: { level: 1 } });
     archive.on("warning", (err) => {
       // eslint-disable-next-line no-console
       console.warn("archive warning:", err);
