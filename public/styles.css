@@ -447,9 +447,19 @@ input[type="color"] {
   transition: transform 120ms ease, filter 120ms ease;
 }
 
+.secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .secondary:hover {
   transform: translateY(-1px);
   filter: brightness(1.08);
+}
+
+.secondary:disabled:hover {
+  transform: none;
+  filter: none;
 }
 
 .secondary.ghost {
@@ -612,6 +622,7 @@ input[type="color"] {
   gap: 10px;
   min-height: 0;
   height: 100%;
+  align-self: start;
 }
 
 .filelist-head {
@@ -631,12 +642,14 @@ input[type="color"] {
 
 .filelist-items {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-  grid-auto-rows: max-content;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 118px));
+  justify-content: start;
+  grid-auto-rows: 118px;
   align-content: start;
   gap: 10px;
   min-height: 0;
-  height: 100%;
+  height: min(100%, 374px);
+  max-height: 374px;
   overflow: auto;
   padding-right: 2px;
 }
@@ -648,6 +661,7 @@ input[type="color"] {
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.02);
   min-height: 118px;
+  height: 118px;
   cursor: grab;
 }
 
@@ -667,7 +681,7 @@ input[type="color"] {
 
 .file-thumb {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  height: 100%;
   object-fit: contain;
   background: rgba(255, 255, 255, 0.02);
   display: block;
