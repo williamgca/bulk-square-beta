@@ -20,6 +20,18 @@ export function createPreviewController({
   let previewTimer = null;
   let previewSeq = 0;
   let previewUrl = null;
+  let lastPreviewKey = null;
+
+  function makeSettingsKey(settings) {
+    return [
+      settings.color,
+      settings.format,
+      settings.sizeMode,
+      String(settings.sizeValue || ""),
+      String(settings.marginY || 0),
+      settings.removeBg ? "1" : "0"
+    ].join("|");
+  }
 
   function setPreviewState({ text, hasImage }) {
     if (hasImage) previewWrap.classList.add("has-image");
@@ -35,6 +47,7 @@ export function createPreviewController({
     }
 
     previewImg.removeAttribute("src");
+    lastPreviewKey = null;
     setPreviewState({ text: "Sube imágenes para ver el preview.", hasImage: false });
   }
 
@@ -56,15 +69,19 @@ export function createPreviewController({
       return;
     }
 
+    const firstItem = items[0];
+    const previewKey = `${firstItem.id}|${makeSettingsKey(settings)}`;
+    if (previewUrl && lastPreviewKey === previewKey) return;
+
     setPreviewState({ text: "Generando preview...", hasImage: false });
 
     try {
       const previewFile = settings.removeBg
         ? await (async () => {
           setPreviewState({ text: "Removiendo fondo para preview...", hasImage: false });
-          return getEffectiveFile(items[0], settings);
+          return getEffectiveFile(firstItem, settings);
         })()
-        : items[0].file;
+        : firstItem.file;
 
       const { blob } = await fetchSingle({
         file: previewFile,
@@ -83,6 +100,7 @@ export function createPreviewController({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       previewUrl = URL.createObjectURL(blob);
       previewImg.src = previewUrl;
+      lastPreviewKey = previewKey;
       setPreviewState({ text: "", hasImage: true });
     } catch (error) {
       // eslint-disable-next-line no-console

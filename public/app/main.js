@@ -27,6 +27,7 @@ function getUiRefs() {
     fileCount: requireElement("fileCount"),
     totalSize: requireElement("totalSize"),
     processBtn: requireElement("processBtn"),
+    downloadSelectedBtn: requireElement("downloadSelectedBtn"),
     cleanBtn: requireElement("cleanBtn"),
     statusEl: requireElement("status"),
     colorPicker: requireElement("colorPicker"),
@@ -45,16 +46,28 @@ function getUiRefs() {
     previewWrap: document.querySelector(".preview"),
     previewImg: requireElement("previewImg"),
     previewPlaceholder: requireElement("previewPlaceholder"),
-    fileListEl: requireElement("fileList")
+    fileListEl: requireElement("fileList"),
+    sidebarMenu: document.querySelector(".sidebar-menu"),
+    mediaZone: document.querySelector(".media-zone"),
+    quickPanel: document.querySelector(".quick-panel"),
+    workspaceMain: document.querySelector(".workspace-main")
   };
 }
 
 (function bootstrap() {
+  const THUMB_DEBOUNCE_MS = 220;
+  const THUMB_PARALLEL_REQUESTS = 2;
+  const MIN_THUMB_SIZE = 320;
+  const MAX_THUMB_SIZE = 640;
+
   const ui = getUiRefs();
   const store = createItemsStore();
   const statusView = createStatusView(ui.statusEl);
   const backgroundRemovalService = createBackgroundRemovalService();
   const api = createProcessApi();
+  let thumbsTimer = null;
+  let thumbsSeq = 0;
+  let thumbRenderFrame = null;
 
   const fileListView = createFileListView({
     container: ui.fileListEl,
@@ -62,11 +75,32 @@ function getUiRefs() {
     onRemove: (index) => {
       if (!store.removeAt(index)) return;
       refreshUi({ schedulePreview: true });
+      scheduleThumbsUpdate();
       statusView.setStatus(store.getItems().length ? "Imagen eliminada." : "Lista vacía.");
     },
     onMove: (from, to) => {
       if (!store.moveItem(from, to)) return;
       refreshUi({ schedulePreview: true });
+    },
+    onToggleSelect: (index) => {
+      if (!store.toggleSelect(index)) return;
+      refreshUi();
+    },
+    onDownloadOne: async (index) => {
+      const items = store.getItems();
+      const item = items[index];
+      if (!item) return;
+
+      try {
+        const settings = getSettingsOrThrow();
+        statusView.setStatus(`Descargando ${item.file.name}...`);
+        await downloadSeparate(settings, [item]);
+        statusView.setStatus("Descarga iniciada.", "ok");
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(error);
+        statusView.setStatus(error && error.message ? error.message : "No se pudo descargar la imagen.", "error");
+      }
     }
   });
 
@@ -135,15 +169,159 @@ function getUiRefs() {
     ui.fileCount.textContent = String(store.getItems().length);
     ui.totalSize.textContent = formatMB(store.totalBytes());
     ui.processBtn.disabled = store.getItems().length === 0;
+    ui.downloadSelectedBtn.disabled = store.selectedCount() === 0;
   }
 
   function refreshUi({ schedulePreview = false } = {}) {
     refreshCounters();
     fileListView.render(store.getItems());
+    ui.downloadSelectedBtn.disabled = store.selectedCount() === 0;
     if (schedulePreview) previewController.scheduleUpdate();
   }
 
+  function makeThumbSettingsKey(settings) {
+    return [
+      settings.color,
+      settings.format,
+      settings.sizeMode,
+      String(settings.sizeValue || ""),
+      String(settings.marginY || 0),
+      settings.removeBg ? "1" : "0"
+    ].join("|");
+  }
+
+  function queueThumbRender() {
+    if (thumbRenderFrame) return;
+    thumbRenderFrame = requestAnimationFrame(() => {
+      thumbRenderFrame = null;
+      fileListView.render(store.getItems());
+    });
+  }
+
+  async function updateProcessedThumbs() {
+    thumbsSeq += 1;
+    const seq = thumbsSeq;
+    const items = store.getItems();
+    if (!items.length) return;
+
+    let settings;
+    try {
+      settings = getSettingsOrThrow();
+    } catch {
+      return;
+    }
+
+    const keyBase = makeThumbSettingsKey(settings);
+    const thumbSize = settings.sizeMode === "fixed"
+      ? Math.max(MIN_THUMB_SIZE, Math.min(MAX_THUMB_SIZE, Math.round(settings.sizeValue || MAX_THUMB_SIZE)))
+      : 512;
+    let needsRender = false;
+
+    for (const item of items) {
+      const expectedKey = `${item.id}|${keyBase}|${thumbSize}`;
+      if (item.processedThumbKey !== expectedKey && item.processedThumbUrl) {
+        try {
+          URL.revokeObjectURL(item.processedThumbUrl);
+        } catch {
+          // ignore
+        }
+        item.processedThumbUrl = null;
+        item.processedThumbKey = null;
+        needsRender = true;
+      }
+    }
+
+    if (needsRender) queueThumbRender();
+
+    const workerCount = Math.max(1, Math.min(THUMB_PARALLEL_REQUESTS, items.length));
+    let cursor = 0;
+
+    const worker = async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) return;
+
+        const item = items[index];
+        const itemKey = `${item.id}|${keyBase}|${thumbSize}`;
+        if (item.processedThumbUrl && item.processedThumbKey === itemKey) continue;
+
+        try {
+          const thumbFile = await backgroundRemovalService.getEffectiveFile(item, settings);
+          const { blob } = await api.fetchSingle({
+            file: thumbFile,
+            color: settings.color,
+            format: settings.format,
+            sizeMode: "fixed",
+            sizeValue: thumbSize,
+            marginY: settings.marginY,
+            order: 1,
+            orderTotal: 1,
+            removeBg: settings.removeBg
+          });
+
+          if (seq !== thumbsSeq) return;
+
+          const nextUrl = URL.createObjectURL(blob);
+          const prevUrl = item.processedThumbUrl;
+          item.processedThumbUrl = nextUrl;
+          item.processedThumbKey = itemKey;
+          if (prevUrl && prevUrl !== nextUrl) {
+            try {
+              URL.revokeObjectURL(prevUrl);
+            } catch {
+              // ignore
+            }
+          }
+
+          queueThumbRender();
+        } catch {
+          if (seq !== thumbsSeq) return;
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  }
+
+  function scheduleThumbsUpdate() {
+    if (thumbsTimer) clearTimeout(thumbsTimer);
+    thumbsTimer = setTimeout(() => {
+      updateProcessedThumbs();
+    }, THUMB_DEBOUNCE_MS);
+  }
+
+  function syncMainPanelHeight() {
+    if (!ui.sidebarMenu || !ui.mediaZone || !ui.quickPanel || !ui.workspaceMain) return;
+
+    if (window.innerWidth <= 1080) {
+      ui.mediaZone.style.removeProperty("min-height");
+      return;
+    }
+
+    const sidebarHeight = Math.ceil(ui.sidebarMenu.getBoundingClientRect().height);
+    const quickPanelHeight = Math.ceil(ui.quickPanel.getBoundingClientRect().height);
+    const mainGap = Number.parseFloat(window.getComputedStyle(ui.workspaceMain).gap || "0") || 0;
+    const targetMediaHeight = Math.floor(sidebarHeight - quickPanelHeight - mainGap);
+
+    if (targetMediaHeight > 0) {
+      ui.mediaZone.style.minHeight = `${targetMediaHeight}px`;
+    } else {
+      ui.mediaZone.style.removeProperty("min-height");
+    }
+  }
+
   function cleanAll({ silent = false } = {}) {
+    thumbsSeq += 1;
+    if (thumbsTimer) {
+      clearTimeout(thumbsTimer);
+      thumbsTimer = null;
+    }
+    if (thumbRenderFrame) {
+      cancelAnimationFrame(thumbRenderFrame);
+      thumbRenderFrame = null;
+    }
+
     store.clear();
     ui.fileInput.value = "";
     previewController.reset();
@@ -155,12 +333,13 @@ function getUiRefs() {
     const added = store.addFiles(fileList);
     if (!added) return;
     refreshUi({ schedulePreview: true });
+    scheduleThumbsUpdate();
     statusView.setStatus(`${added} imagen(es) agregada(s). Total: ${store.getItems().length}.`);
   }
 
-  async function downloadZip(settings, zipMode) {
+  async function downloadZip(settings, zipMode, items) {
     const blob = await api.fetchZip({
-      items: store.getItems(),
+      items,
       getEffectiveFile: backgroundRemovalService.getEffectiveFile,
       onItemStart: (index, total) => {
         if (settings.removeBg) statusView.setStatus(`Removiendo fondo... ${index + 1}/${total}`);
@@ -177,8 +356,7 @@ function getUiRefs() {
     triggerDownload(blob, "bulk-square-results.zip");
   }
 
-  async function downloadSeparate(settings) {
-    const items = store.getItems();
+  async function downloadSeparate(settings, items) {
     const total = items.length;
     const maxWorkers = Math.max(1, Math.min(DOWNLOAD_PARALLEL_REQUESTS, total));
     let completed = 0;
@@ -264,6 +442,7 @@ function getUiRefs() {
     ui.colorPicker.addEventListener("input", () => {
       ui.colorHex.value = ui.colorPicker.value.toLowerCase();
       previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
     });
 
     ui.colorHex.addEventListener("input", () => {
@@ -276,23 +455,35 @@ function getUiRefs() {
       }
 
       previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
     });
 
     if (ui.removeBgToggle) {
       ui.removeBgToggle.addEventListener("change", () => {
         updatePaddingUIState();
         previewController.scheduleUpdate();
+        scheduleThumbsUpdate();
       });
     }
 
     ui.sizeMode.addEventListener("change", () => {
       updateSizeModeUi();
       previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
     });
 
-    ui.sizeValue.addEventListener("input", () => previewController.scheduleUpdate());
-    ui.formatSelect.addEventListener("change", () => previewController.scheduleUpdate());
-    ui.marginYInput.addEventListener("input", () => previewController.scheduleUpdate());
+    ui.sizeValue.addEventListener("input", () => {
+      previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
+    });
+    ui.formatSelect.addEventListener("change", () => {
+      previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
+    });
+    ui.marginYInput.addEventListener("input", () => {
+      previewController.scheduleUpdate();
+      scheduleThumbsUpdate();
+    });
 
     if (ui.marginClearBtn) {
       ui.marginClearBtn.addEventListener("click", () => {
@@ -305,43 +496,57 @@ function getUiRefs() {
       cleanAll();
     });
 
-    ui.processBtn.addEventListener("click", async () => {
-      if (!store.getItems().length) return;
+    const runDownload = async ({ selectedOnly }) => {
+      const allItems = store.getItems();
+      const targetItems = selectedOnly ? store.getSelectedItems() : allItems;
+      if (!targetItems.length) return;
 
       ui.processBtn.disabled = true;
-      statusView.setStatus("Procesando...");
+      ui.downloadSelectedBtn.disabled = true;
+      statusView.setStatus(selectedOnly ? "Descargando selección..." : "Descargando...");
 
       try {
         const settings = getSettingsOrThrow();
 
         if (settings.downloadMode === "zip") {
-          await downloadZip(settings, "zip");
+          await downloadZip(settings, "zip", targetItems);
           statusView.setStatus("Listo. ZIP descargado.", "ok");
         } else if (settings.downloadMode === "folder") {
-          await downloadZip(settings, "folder");
+          await downloadZip(settings, "folder", targetItems);
           statusView.setStatus("Listo. ZIP con carpeta descargado (en Descargas).", "ok");
         } else {
-          await downloadSeparate(settings);
+          await downloadSeparate(settings, targetItems);
           statusView.setStatus("Listo. Descargas iniciadas.", "ok");
         }
 
-        if (settings.shouldAutoClean) cleanAll({ silent: true });
+        if (!selectedOnly && settings.shouldAutoClean) cleanAll({ silent: true });
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error(error);
-        statusView.setStatus(error && error.message ? error.message : "Falló el proceso. Revisa la consola del navegador.", "error");
+        statusView.setStatus(error && error.message ? error.message : "Falló la descarga. Revisa la consola del navegador.", "error");
       } finally {
-        ui.processBtn.disabled = store.getItems().length === 0;
+        refreshCounters();
       }
-    });
+    };
+
+    ui.processBtn.addEventListener("click", async () => runDownload({ selectedOnly: false }));
+    ui.downloadSelectedBtn.addEventListener("click", async () => runDownload({ selectedOnly: true }));
   }
 
   setupCustomSelects();
   bindDropzone();
   bindFormEvents();
+  document.querySelectorAll(".menu-group").forEach((group) => {
+    group.addEventListener("toggle", () => {
+      requestAnimationFrame(syncMainPanelHeight);
+    });
+  });
+  window.addEventListener("resize", syncMainPanelHeight);
   updatePaddingUIState();
   updateSizeModeUi();
   refreshUi();
   previewController.scheduleUpdate();
+  scheduleThumbsUpdate();
+  requestAnimationFrame(syncMainPanelHeight);
   statusView.setStatus("Agrega imágenes para comenzar.");
 })();

@@ -24,7 +24,10 @@ export function createItemsStore() {
       id: uid(),
       file,
       url: URL.createObjectURL(file),
-      removeBgFile: null
+      removeBgFile: null,
+      processedThumbUrl: null,
+      processedThumbKey: null,
+      selected: false
     }));
 
     items = items.concat(mapped);
@@ -37,6 +40,11 @@ export function createItemsStore() {
     const [item] = items.splice(index, 1);
     try {
       URL.revokeObjectURL(item.url);
+    } catch {
+      // ignore
+    }
+    try {
+      if (item.processedThumbUrl) URL.revokeObjectURL(item.processedThumbUrl);
     } catch {
       // ignore
     }
@@ -63,9 +71,32 @@ export function createItemsStore() {
       } catch {
         // ignore
       }
+      try {
+        if (item.processedThumbUrl) URL.revokeObjectURL(item.processedThumbUrl);
+      } catch {
+        // ignore
+      }
     }
 
     items = [];
+  }
+
+  function toggleSelect(index) {
+    if (index < 0 || index >= items.length) return false;
+    items[index].selected = !items[index].selected;
+    return true;
+  }
+
+  function clearSelection() {
+    for (const item of items) item.selected = false;
+  }
+
+  function selectedCount() {
+    return items.reduce((acc, item) => acc + (item.selected ? 1 : 0), 0);
+  }
+
+  function getSelectedItems() {
+    return items.filter((item) => item.selected);
   }
 
   function totalBytes() {
@@ -78,6 +109,10 @@ export function createItemsStore() {
     removeAt,
     moveItem,
     clear,
-    totalBytes
+    totalBytes,
+    toggleSelect,
+    clearSelection,
+    selectedCount,
+    getSelectedItems
   };
 }

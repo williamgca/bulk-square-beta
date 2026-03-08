@@ -1,4 +1,4 @@
-export function createFileListView({ container, formatBytes, onRemove, onMove }) {
+export function createFileListView({ container, formatBytes, onRemove, onMove, onToggleSelect, onDownloadOne }) {
   let dragIndex = null;
 
   function render(items) {
@@ -19,8 +19,14 @@ export function createFileListView({ container, formatBytes, onRemove, onMove })
 
       const thumb = document.createElement("img");
       thumb.className = "file-thumb";
-      thumb.src = item.url;
+      thumb.src = item.processedThumbUrl || item.url;
       thumb.alt = item.file.name;
+
+      if (item.selected) row.classList.add("is-selected");
+
+      const check = document.createElement("div");
+      check.className = "file-check";
+      check.textContent = "✓";
 
       const meta = document.createElement("div");
       meta.className = "file-meta";
@@ -46,13 +52,33 @@ export function createFileListView({ container, formatBytes, onRemove, onMove })
       del.setAttribute("aria-label", `Eliminar ${item.file.name}`);
       del.addEventListener("click", (event) => {
         event.preventDefault();
+        event.stopPropagation();
         onRemove(index);
       });
 
+      const dl = document.createElement("button");
+      dl.type = "button";
+      dl.className = "iconbtn";
+      dl.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v10m0 0l4-4m-4 4l-4-4M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3\"/></svg>";
+      dl.setAttribute("aria-label", `Descargar ${item.file.name}`);
+      dl.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDownloadOne(index);
+      });
+
+      actions.appendChild(dl);
       actions.appendChild(del);
+      row.appendChild(check);
       row.appendChild(thumb);
       row.appendChild(meta);
       row.appendChild(actions);
+
+      row.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target && target.closest && target.closest(".file-actions")) return;
+        onToggleSelect(index);
+      });
 
       row.addEventListener("dragstart", (event) => {
         dragIndex = index;
