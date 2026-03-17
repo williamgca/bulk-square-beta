@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">SquareEdit favicon</title>
+  <desc id="desc">Minimalist black favicon with white square crop mark.</desc>
+  <rect x="22" y="22" width="212" height="212" rx="38" fill="#000"/>
+  <g transform="translate(14 14) scale(0.88)">
+    <path d="M92 36 H52 Q36 36 36 52 V92" fill="none" stroke="#FFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M164 36 H204 Q220 36 220 52 V92" fill="none" stroke="#FFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M36 164 V204 Q36 220 52 220 H92" fill="none" stroke="#FFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M164 220 H204 Q220 220 220 204 V164" fill="none" stroke="#FFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="94" y="94" width="68" height="68" fill="none" stroke="#FFF" stroke-width="12"/>
+  </g>
+</svg>

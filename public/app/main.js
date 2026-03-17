@@ -47,6 +47,8 @@ function getUiRefs() {
     previewImg: requireElement("previewImg"),
     previewPlaceholder: requireElement("previewPlaceholder"),
     fileListEl: requireElement("fileList"),
+    themeToggle: document.getElementById("themeToggle"),
+    themeLabel: document.getElementById("themeLabel"),
     sidebarMenu: document.querySelector(".sidebar-menu"),
     mediaZone: document.querySelector(".media-zone"),
     quickPanel: document.querySelector(".quick-panel"),
@@ -55,6 +57,7 @@ function getUiRefs() {
 }
 
 (function bootstrap() {
+  const THEME_STORAGE_KEY = "bulk-square-theme";
   const THUMB_DEBOUNCE_MS = 220;
   const THUMB_PARALLEL_REQUESTS = 2;
   const MIN_THUMB_SIZE = 320;
@@ -68,6 +71,31 @@ function getUiRefs() {
   let thumbsTimer = null;
   let thumbsSeq = 0;
   let thumbRenderFrame = null;
+
+  function applyTheme(theme) {
+    const nextTheme = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", nextTheme);
+    if (ui.themeToggle) ui.themeToggle.checked = nextTheme === "dark";
+    if (ui.themeLabel) ui.themeLabel.textContent = nextTheme === "dark" ? "Modo claro" : "Modo oscuro";
+  }
+
+  function initTheme() {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialTheme = savedTheme === "light" || savedTheme === "dark"
+      ? savedTheme
+      : (prefersDark ? "dark" : "light");
+
+    applyTheme(initialTheme);
+
+    if (ui.themeToggle) {
+      ui.themeToggle.addEventListener("change", () => {
+        const nextTheme = ui.themeToggle.checked ? "dark" : "light";
+        applyTheme(nextTheme);
+        localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+      });
+    }
+  }
 
   const fileListView = createFileListView({
     container: ui.fileListEl,
@@ -357,11 +385,11 @@ function getUiRefs() {
   }
 
   async function downloadSeparate(settings, items) {
+    const DOWNLOAD_TRIGGER_INTERVAL_MS = 180;
     const total = items.length;
     const maxWorkers = Math.max(1, Math.min(DOWNLOAD_PARALLEL_REQUESTS, total));
+    const readyResults = new Array(total);
     let completed = 0;
-    let nextDownloadIndex = total - 1;
-    const readyResults = new Map();
     statusView.setStatus(`Procesando y descargando... 0/${total}`);
 
     const runOne = async (index) => {
@@ -377,20 +405,7 @@ function getUiRefs() {
         removeBg: settings.removeBg
       });
 
-      readyResults.set(index, result);
-      while (readyResults.has(nextDownloadIndex)) {
-        const ready = readyResults.get(nextDownloadIndex);
-        readyResults.delete(nextDownloadIndex);
-        const filename = ready.filename || computeFallbackFilename(
-          items[nextDownloadIndex].file,
-          settings.format,
-          nextDownloadIndex + 1,
-          total,
-          settings.marginY
-        );
-        triggerDownload(ready.blob, filename);
-        nextDownloadIndex -= 1;
-      }
+      readyResults[index] = result;
 
       completed += 1;
       statusView.setStatus(`Procesando y descargando... ${completed}/${total}`);
@@ -403,6 +418,30 @@ function getUiRefs() {
     })());
 
     await Promise.all(workers);
+
+    statusView.setStatus(`Iniciando descargas... 0/${total}`);
+    let triggered = 0;
+    for (let index = total - 1; index >= 0; index -= 1) {
+      const ready = readyResults[index];
+      if (!ready) {
+        throw new Error("Faltan resultados de algunas imagenes. Intenta nuevamente.");
+      }
+
+      const filename = ready.filename || computeFallbackFilename(
+        items[index].file,
+        settings.format,
+        index + 1,
+        total,
+        settings.marginY
+      );
+      triggerDownload(ready.blob, filename);
+      triggered += 1;
+      statusView.setStatus(`Iniciando descargas... ${triggered}/${total}`);
+
+      if (index > 0) {
+        await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_TRIGGER_INTERVAL_MS));
+      }
+    }
   }
 
   function bindDropzone() {
@@ -449,9 +488,9 @@ function getUiRefs() {
       const value = ui.colorHex.value.trim();
       if (isHex(value)) {
         ui.colorPicker.value = value;
-        ui.colorHex.style.borderColor = "rgba(255,255,255,0.12)";
+        ui.colorHex.style.borderColor = "var(--border)";
       } else {
-        ui.colorHex.style.borderColor = "rgba(248,113,113,0.8)";
+        ui.colorHex.style.borderColor = "var(--danger)";
       }
 
       previewController.scheduleUpdate();
@@ -534,6 +573,7 @@ function getUiRefs() {
   }
 
   setupCustomSelects();
+  initTheme();
   bindDropzone();
   bindFormEvents();
   document.querySelectorAll(".menu-group").forEach((group) => {
