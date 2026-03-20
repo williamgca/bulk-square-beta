@@ -8,7 +8,8 @@ export function createPreviewController({
   getItems,
   getSettingsOrThrow,
   getEffectiveFile,
-  fetchSingle
+  fetchSingle,
+  t
 }) {
   if (!previewCard) {
     return {
@@ -48,7 +49,7 @@ export function createPreviewController({
 
     previewImg.removeAttribute("src");
     lastPreviewKey = null;
-    setPreviewState({ text: "Sube imágenes para ver el preview.", hasImage: false });
+    setPreviewState({ text: t("previewEmpty"), hasImage: false });
   }
 
   async function updatePreview() {
@@ -65,7 +66,7 @@ export function createPreviewController({
     try {
       settings = getSettingsOrThrow();
     } catch (error) {
-      setPreviewState({ text: error && error.message ? error.message : "Ajustes inválidos.", hasImage: false });
+      setPreviewState({ text: error && error.message ? error.message : t("previewInvalidSettings"), hasImage: false });
       return;
     }
 
@@ -73,12 +74,12 @@ export function createPreviewController({
     const previewKey = `${firstItem.id}|${makeSettingsKey(settings)}`;
     if (previewUrl && lastPreviewKey === previewKey) return;
 
-    setPreviewState({ text: "Generando preview...", hasImage: false });
+    setPreviewState({ text: t("previewGenerating"), hasImage: false });
 
     try {
       const previewFile = settings.removeBg
         ? await (async () => {
-          setPreviewState({ text: "Removiendo fondo para preview...", hasImage: false });
+          setPreviewState({ text: t("previewRemovingBg"), hasImage: false });
           return getEffectiveFile(firstItem, settings);
         })()
         : firstItem.file;
@@ -105,7 +106,7 @@ export function createPreviewController({
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(error);
-      setPreviewState({ text: "No se pudo generar el preview.", hasImage: false });
+      setPreviewState({ text: t("previewFailed"), hasImage: false });
     }
   }
 

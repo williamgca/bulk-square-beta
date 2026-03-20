@@ -1,11 +1,11 @@
-export function createFileListView({ container, formatBytes, onRemove, onMove, onToggleSelect, onDownloadOne }) {
+export function createFileListView({ container, formatBytes, onRemove, onMove, onToggleSelect, onDownloadOne, t }) {
   let dragIndex = null;
 
   function render(items) {
     if (!container) return;
 
     if (!items.length) {
-      container.innerHTML = "<div class=\"file-empty\">No hay imagenes. Agrega algunas para verlas aqui.</div>";
+      container.innerHTML = `<div class="file-empty">${t("fileEmpty")}</div>`;
       return;
     }
 
@@ -49,7 +49,7 @@ export function createFileListView({ container, formatBytes, onRemove, onMove, o
       del.type = "button";
       del.className = "iconbtn";
       del.textContent = "X";
-      del.setAttribute("aria-label", `Eliminar ${item.file.name}`);
+      del.setAttribute("aria-label", t("removeItem", { name: item.file.name }));
       del.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -60,7 +60,7 @@ export function createFileListView({ container, formatBytes, onRemove, onMove, o
       dl.type = "button";
       dl.className = "iconbtn";
       dl.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v10m0 0l4-4m-4 4l-4-4M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3\"/></svg>";
-      dl.setAttribute("aria-label", `Descargar ${item.file.name}`);
+      dl.setAttribute("aria-label", t("downloadItem", { name: item.file.name }));
       dl.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();

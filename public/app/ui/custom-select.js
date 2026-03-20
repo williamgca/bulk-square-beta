@@ -28,11 +28,31 @@ function setupCustomSelect(selectEl) {
   menu.className = "cselect-menu";
   menu.setAttribute("role", "listbox");
 
+  function buildOptionContent(option, { compact = false } = {}) {
+    const fragment = document.createDocumentFragment();
+    const iconName = option.dataset.icon;
+
+    if (iconName) {
+      const icon = document.createElement("span");
+      icon.className = `cselect-icon ${iconName}`;
+      icon.setAttribute("aria-hidden", "true");
+      fragment.appendChild(icon);
+    }
+
+    const label = document.createElement("span");
+    label.className = compact ? "cselect-label compact" : "cselect-label";
+    label.textContent = option.textContent || "";
+    fragment.appendChild(label);
+
+    return fragment;
+  }
+
   wrapper.appendChild(trigger);
   document.body.appendChild(menu);
 
   const positionMenu = () => {
     const rect = trigger.getBoundingClientRect();
+    const viewportW = window.innerWidth || document.documentElement.clientWidth;
     const viewportH = window.innerHeight || document.documentElement.clientHeight;
     const gap = 8;
     const minMenuHeight = 140;
@@ -43,9 +63,13 @@ function setupCustomSelect(selectEl) {
     const openUp = spaceBelow < minMenuHeight && spaceAbove > spaceBelow;
     const usableSpace = openUp ? spaceAbove : spaceBelow;
     const maxHeight = Math.max(minMenuHeight, Math.min(preferredMaxHeight, usableSpace - 6));
+    const menuWidth = Math.min(Math.round(rect.width), Math.max(180, viewportW - (gap * 2)));
+    const menuLeft = Math.max(gap, Math.min(Math.round(rect.left), viewportW - menuWidth - gap));
 
-    menu.style.minWidth = `${Math.round(rect.width)}px`;
-    menu.style.left = `${Math.round(rect.left)}px`;
+    menu.style.width = `${menuWidth}px`;
+    menu.style.minWidth = `${menuWidth}px`;
+    menu.style.maxWidth = `${menuWidth}px`;
+    menu.style.left = `${menuLeft}px`;
     menu.style.top = openUp
       ? `${Math.round(rect.top - gap)}px`
       : `${Math.round(rect.bottom + gap)}px`;
@@ -73,7 +97,8 @@ function setupCustomSelect(selectEl) {
 
   const syncLabel = () => {
     const option = selectEl.options[selectEl.selectedIndex];
-    valueEl.textContent = option ? option.textContent : "";
+    valueEl.innerHTML = "";
+    if (option) valueEl.appendChild(buildOptionContent(option, { compact: selectEl.dataset.cselectCompact === "1" }));
 
     menu.querySelectorAll(".cselect-option").forEach((button) => {
       const value = button.getAttribute("data-value");
@@ -90,7 +115,7 @@ function setupCustomSelect(selectEl) {
       btn.className = "cselect-option";
       btn.setAttribute("role", "option");
       btn.setAttribute("data-value", option.value);
-      btn.textContent = option.textContent;
+      btn.appendChild(buildOptionContent(option));
 
       btn.addEventListener("click", () => {
         selectEl.value = option.value;
@@ -124,8 +149,15 @@ function setupCustomSelect(selectEl) {
   document.addEventListener("scroll", handleViewportChange, true);
 
   selectEl.addEventListener("change", syncLabel);
+  selectEl._cselectRefresh = rebuild;
 }
 
 export function setupCustomSelects() {
   document.querySelectorAll("select[data-cselect]").forEach(setupCustomSelect);
+}
+
+export function refreshCustomSelects() {
+  document.querySelectorAll("select[data-cselect]").forEach((selectEl) => {
+    if (typeof selectEl._cselectRefresh === "function") selectEl._cselectRefresh();
+  });
 }

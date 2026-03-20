@@ -59,7 +59,10 @@
           </label>
 
           <label class="field">
-            <span>Tamaño final</span>
+            <span class="field-label tooltip-label">
+              <span class="field-label-text">Tamaño final</span>
+              <span class="tooltip-anchor" data-tooltip="Auto usa el lado mayor original. Numérico fuerza el lado final." tabindex="0" aria-label="Más información sobre Tamaño final">i</span>
+            </span>
             <div class="inline">
               <select id="sizeMode" data-cselect>
                 <option value="auto">Auto (max lado)</option>
@@ -69,7 +72,6 @@
                 <input id="sizeValue" type="number" min="1" max="10000" step="1" value="1080" />
               </div>
             </div>
-            <small class="hint">Auto usa el lado mayor original. Numérico fuerza el lado del cuadrado final.</small>
           </label>
 
           <label class="field">

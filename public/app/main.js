@@ -3,7 +3,8 @@ import { createItemsStore } from "./state/items-store.js";
 import { createBackgroundRemovalService } from "./services/background-removal.js";
 import { createProcessApi } from "./services/api-client.js";
 import { triggerDownload } from "./services/download.js";
-import { setupCustomSelects } from "./ui/custom-select.js";
+import { createI18n } from "./i18n.js";
+import { refreshCustomSelects, setupCustomSelects } from "./ui/custom-select.js";
 import { createFileListView } from "./ui/file-list-view.js";
 import { createPreviewController } from "./ui/preview-controller.js";
 import { createStatusView } from "./ui/status-view.js";
@@ -47,16 +48,15 @@ function getUiRefs() {
     previewImg: requireElement("previewImg"),
     previewPlaceholder: requireElement("previewPlaceholder"),
     fileListEl: requireElement("fileList"),
+    languageSelect: document.getElementById("languageSelect"),
     themeToggle: document.getElementById("themeToggle"),
     themeLabel: document.getElementById("themeLabel"),
-    sidebarMenu: document.querySelector(".sidebar-menu"),
-    mediaZone: document.querySelector(".media-zone"),
-    quickPanel: document.querySelector(".quick-panel"),
-    workspaceMain: document.querySelector(".workspace-main")
+    brandLogo: document.getElementById("brandLogo")
   };
 }
 
 (function bootstrap() {
+  const LANGUAGE_STORAGE_KEY = "bulk-square-language";
   const THEME_STORAGE_KEY = "bulk-square-theme";
   const THUMB_DEBOUNCE_MS = 220;
   const THUMB_PARALLEL_REQUESTS = 2;
@@ -64,6 +64,8 @@ function getUiRefs() {
   const MAX_THUMB_SIZE = 640;
 
   const ui = getUiRefs();
+  const initialLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY) || "es";
+  const i18n = createI18n(initialLanguage);
   const store = createItemsStore();
   const statusView = createStatusView(ui.statusEl);
   const backgroundRemovalService = createBackgroundRemovalService();
@@ -72,11 +74,52 @@ function getUiRefs() {
   let thumbsSeq = 0;
   let thumbRenderFrame = null;
 
+  function t(key, params) {
+    return i18n.t(key, params);
+  }
+
+  function applyTranslations() {
+    document.documentElement.lang = t("pageLanguage");
+
+    document.querySelectorAll("[data-i18n]").forEach((node) => {
+      node.textContent = t(node.dataset.i18n);
+    });
+
+    document.querySelectorAll("[data-i18n-alt]").forEach((node) => {
+      node.setAttribute("alt", t(node.dataset.i18nAlt));
+    });
+
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
+      node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
+    });
+
+    document.querySelectorAll("[data-i18n-tooltip]").forEach((node) => {
+      node.setAttribute("data-tooltip", t(node.dataset.i18nTooltip));
+    });
+
+    document.querySelectorAll("[data-i18n-aria-label-template]").forEach((node) => {
+      const templateKey = node.dataset.i18nAriaLabelTemplate;
+      const paramKey = node.dataset.i18nAriaLabelParam;
+      node.setAttribute("aria-label", t(templateKey, { label: t(paramKey) }));
+    });
+
+    if (ui.languageSelect) {
+      ui.languageSelect.setAttribute("aria-label", t("languageSelectAria"));
+      ui.languageSelect.value = i18n.getLanguage();
+    }
+
+    if (ui.themeToggle) ui.themeToggle.setAttribute("aria-label", t("themeSwitchAria"));
+
+    refreshCustomSelects();
+    refreshUi();
+    previewController.scheduleUpdate();
+  }
+
   function applyTheme(theme) {
     const nextTheme = theme === "dark" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", nextTheme);
     if (ui.themeToggle) ui.themeToggle.checked = nextTheme === "dark";
-    if (ui.themeLabel) ui.themeLabel.textContent = nextTheme === "dark" ? "Modo claro" : "Modo oscuro";
+    if (ui.brandLogo) ui.brandLogo.src = nextTheme === "dark" ? "/logo(white).svg" : "/logo(black).svg";
   }
 
   function initTheme() {
@@ -100,11 +143,12 @@ function getUiRefs() {
   const fileListView = createFileListView({
     container: ui.fileListEl,
     formatBytes: bytesToNice,
+    t,
     onRemove: (index) => {
       if (!store.removeAt(index)) return;
       refreshUi({ schedulePreview: true });
       scheduleThumbsUpdate();
-      statusView.setStatus(store.getItems().length ? "Imagen eliminada." : "Lista vacía.");
+      statusView.setStatus(store.getItems().length ? t("toastItemRemoved") : t("toastListEmpty"));
     },
     onMove: (from, to) => {
       if (!store.moveItem(from, to)) return;
@@ -121,13 +165,13 @@ function getUiRefs() {
 
       try {
         const settings = getSettingsOrThrow();
-        statusView.setStatus(`Descargando ${item.file.name}...`);
+        statusView.setStatus(t("toastDownloadingFile", { name: item.file.name }));
         await downloadSeparate(settings, [item]);
-        statusView.setStatus("Descarga iniciada.", "ok");
+        statusView.setStatus(t("toastDownloadStarted"), "ok");
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error(error);
-        statusView.setStatus(error && error.message ? error.message : "No se pudo descargar la imagen.", "error");
+        statusView.setStatus(error && error.message ? error.message : t("toastDownloadFailed"), "error");
       }
     }
   });
@@ -149,7 +193,7 @@ function getUiRefs() {
     const color = String(ui.colorHex.value || "").trim().toLowerCase();
 
     if (!removeBg && !isHex(color)) {
-      throw new Error("Color inválido. Usa HEX tipo #ffffff.");
+      throw new Error(t("toastColorInvalid"));
     }
 
     const format = ui.formatSelect.value;
@@ -158,13 +202,13 @@ function getUiRefs() {
 
     if (sizeMode === "fixed") {
       if (!Number.isFinite(sizeValue) || sizeValue <= 0 || sizeValue > MAX_SIZE) {
-        throw new Error(`Tamaño inválido. Debe ser un número entre 1 y ${MAX_SIZE}.`);
+        throw new Error(t("toastSizeInvalid", { max: MAX_SIZE }));
       }
     }
 
     const marginY = Math.max(0, Math.round(Number(ui.marginYInput.value) || 0));
     if (!Number.isFinite(marginY) || marginY < 0 || marginY > MAX_SIZE) {
-      throw new Error(`Margen inválido. Debe ser un número entre 0 y ${MAX_SIZE}.`);
+      throw new Error(t("toastMarginInvalid", { max: MAX_SIZE }));
     }
 
     const downloadMode = ui.downloadMode.value || "separate";
@@ -190,7 +234,8 @@ function getUiRefs() {
     getItems: store.getItems,
     getSettingsOrThrow,
     getEffectiveFile: backgroundRemovalService.getEffectiveFile,
-    fetchSingle: api.fetchSingle
+    fetchSingle: api.fetchSingle,
+    t
   });
 
   function refreshCounters() {
@@ -319,24 +364,32 @@ function getUiRefs() {
     }, THUMB_DEBOUNCE_MS);
   }
 
-  function syncMainPanelHeight() {
-    if (!ui.sidebarMenu || !ui.mediaZone || !ui.quickPanel || !ui.workspaceMain) return;
+  function lockSettingsGroups() {
+    const groups = document.querySelectorAll(".menu-group");
+    groups.forEach((group) => {
+      group.open = true;
+      group.classList.add("menu-group-static");
 
-    if (window.innerWidth <= 1080) {
-      ui.mediaZone.style.removeProperty("min-height");
-      return;
-    }
+      const summary = group.querySelector("summary");
+      if (!summary) return;
 
-    const sidebarHeight = Math.ceil(ui.sidebarMenu.getBoundingClientRect().height);
-    const quickPanelHeight = Math.ceil(ui.quickPanel.getBoundingClientRect().height);
-    const mainGap = Number.parseFloat(window.getComputedStyle(ui.workspaceMain).gap || "0") || 0;
-    const targetMediaHeight = Math.floor(sidebarHeight - quickPanelHeight - mainGap);
+      summary.tabIndex = -1;
+      summary.setAttribute("aria-disabled", "true");
+      summary.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      summary.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      });
 
-    if (targetMediaHeight > 0) {
-      ui.mediaZone.style.minHeight = `${targetMediaHeight}px`;
-    } else {
-      ui.mediaZone.style.removeProperty("min-height");
-    }
+      group.addEventListener("toggle", () => {
+        if (!group.open) group.open = true;
+      });
+    });
   }
 
   function cleanAll({ silent = false } = {}) {
@@ -354,7 +407,7 @@ function getUiRefs() {
     ui.fileInput.value = "";
     previewController.reset();
     refreshUi();
-    if (!silent) statusView.setStatus("Listo. Limpio para empezar de 0.", "ok");
+    if (!silent) statusView.setStatus(t("toastListCleared"), "ok");
   }
 
   function addFiles(fileList) {
@@ -362,7 +415,7 @@ function getUiRefs() {
     if (!added) return;
     refreshUi({ schedulePreview: true });
     scheduleThumbsUpdate();
-    statusView.setStatus(`${added} imagen(es) agregada(s). Total: ${store.getItems().length}.`);
+    statusView.setStatus(t("toastImagesAdded", { count: added }), "ok");
   }
 
   async function downloadZip(settings, zipMode, items) {
@@ -370,7 +423,7 @@ function getUiRefs() {
       items,
       getEffectiveFile: backgroundRemovalService.getEffectiveFile,
       onItemStart: (index, total) => {
-        if (settings.removeBg) statusView.setStatus(`Removiendo fondo... ${index + 1}/${total}`);
+        if (settings.removeBg) statusView.setStatus(t("toastRemovingBg", { current: index + 1, total }));
       },
       color: settings.color,
       format: settings.format,
@@ -390,7 +443,7 @@ function getUiRefs() {
     const maxWorkers = Math.max(1, Math.min(DOWNLOAD_PARALLEL_REQUESTS, total));
     const readyResults = new Array(total);
     let completed = 0;
-    statusView.setStatus(`Procesando y descargando... 0/${total}`);
+    statusView.setStatus(t("toastPreparingFiles", { current: 0, total }));
 
     const runOne = async (index) => {
       const result = await api.fetchSingle({
@@ -408,7 +461,7 @@ function getUiRefs() {
       readyResults[index] = result;
 
       completed += 1;
-      statusView.setStatus(`Procesando y descargando... ${completed}/${total}`);
+      statusView.setStatus(t("toastPreparingFiles", { current: completed, total }));
     };
 
     const workers = Array.from({ length: maxWorkers }, (_unused, workerIndex) => (async () => {
@@ -419,12 +472,12 @@ function getUiRefs() {
 
     await Promise.all(workers);
 
-    statusView.setStatus(`Iniciando descargas... 0/${total}`);
+    statusView.setStatus(t("toastStartingDownload", { current: 0, total }));
     let triggered = 0;
     for (let index = total - 1; index >= 0; index -= 1) {
       const ready = readyResults[index];
       if (!ready) {
-        throw new Error("Faltan resultados de algunas imagenes. Intenta nuevamente.");
+        throw new Error(t("toastMissingResults"));
       }
 
       const filename = ready.filename || computeFallbackFilename(
@@ -436,7 +489,7 @@ function getUiRefs() {
       );
       triggerDownload(ready.blob, filename);
       triggered += 1;
-      statusView.setStatus(`Iniciando descargas... ${triggered}/${total}`);
+      statusView.setStatus(t("toastStartingDownload", { current: triggered, total }));
 
       if (index > 0) {
         await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_TRIGGER_INTERVAL_MS));
@@ -535,6 +588,15 @@ function getUiRefs() {
       cleanAll();
     });
 
+    if (ui.languageSelect) {
+      ui.languageSelect.value = i18n.getLanguage();
+      ui.languageSelect.addEventListener("change", () => {
+        const nextLanguage = i18n.setLanguage(ui.languageSelect.value);
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+        applyTranslations();
+      });
+    }
+
     const runDownload = async ({ selectedOnly }) => {
       const allItems = store.getItems();
       const targetItems = selectedOnly ? store.getSelectedItems() : allItems;
@@ -542,27 +604,27 @@ function getUiRefs() {
 
       ui.processBtn.disabled = true;
       ui.downloadSelectedBtn.disabled = true;
-      statusView.setStatus(selectedOnly ? "Descargando selección..." : "Descargando...");
+      statusView.setStatus(selectedOnly ? t("toastDownloadingSelection") : t("toastDownloading"));
 
       try {
         const settings = getSettingsOrThrow();
 
         if (settings.downloadMode === "zip") {
           await downloadZip(settings, "zip", targetItems);
-          statusView.setStatus("Listo. ZIP descargado.", "ok");
+          statusView.setStatus(t("toastZipReady"), "ok");
         } else if (settings.downloadMode === "folder") {
           await downloadZip(settings, "folder", targetItems);
-          statusView.setStatus("Listo. ZIP con carpeta descargado (en Descargas).", "ok");
+          statusView.setStatus(t("toastFolderZipReady"), "ok");
         } else {
           await downloadSeparate(settings, targetItems);
-          statusView.setStatus("Listo. Descargas iniciadas.", "ok");
+          statusView.setStatus(t("toastDownloadStarted"), "ok");
         }
 
         if (!selectedOnly && settings.shouldAutoClean) cleanAll({ silent: true });
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error(error);
-        statusView.setStatus(error && error.message ? error.message : "Falló la descarga. Revisa la consola del navegador.", "error");
+        statusView.setStatus(error && error.message ? error.message : t("toastDownloadError"), "error");
       } finally {
         refreshCounters();
       }
@@ -574,19 +636,13 @@ function getUiRefs() {
 
   setupCustomSelects();
   initTheme();
+  applyTranslations();
   bindDropzone();
   bindFormEvents();
-  document.querySelectorAll(".menu-group").forEach((group) => {
-    group.addEventListener("toggle", () => {
-      requestAnimationFrame(syncMainPanelHeight);
-    });
-  });
-  window.addEventListener("resize", syncMainPanelHeight);
+  lockSettingsGroups();
   updatePaddingUIState();
   updateSizeModeUi();
   refreshUi();
   previewController.scheduleUpdate();
   scheduleThumbsUpdate();
-  requestAnimationFrame(syncMainPanelHeight);
-  statusView.setStatus("Agrega imágenes para comenzar.");
 })();

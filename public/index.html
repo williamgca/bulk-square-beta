@@ -14,25 +14,44 @@
     <header class="header">
       <div class="header-top">
         <div class="brand">
-          <img src="/logo.svg" alt="Bulk Square logo" class="brand-logo" />
-          <h1>Bulk Square (V1.2)</h1>
+          <img id="brandLogo" src="/logo(black).svg" alt="Bulk Square logo" class="brand-logo" data-i18n-alt="brandAlt" />
         </div>
-        <label class="toggle theme-toggle" for="themeToggle">
-          <span id="themeLabel" class="toggle-label">Modo oscuro</span>
-          <span class="switch">
-            <input id="themeToggle" type="checkbox" />
-            <span class="slider" aria-hidden="true"></span>
-          </span>
-        </label>
+        <div class="header-controls">
+          <label class="language-picker" for="languageSelect">
+            <span class="sr-only" data-i18n="languageSelectAria">Cambiar idioma</span>
+            <select id="languageSelect" data-cselect data-cselect-compact="1" aria-label="Cambiar idioma">
+              <option value="es" data-icon="flag-es" data-i18n="languageSpanish">Español</option>
+              <option value="en" data-icon="flag-us" data-i18n="languageEnglish">English</option>
+            </select>
+          </label>
+          <label class="toggle theme-toggle" for="themeToggle">
+            <span id="themeLabel" class="sr-only" data-i18n="themeLabel">Tema</span>
+            <span class="switch">
+              <input id="themeToggle" type="checkbox" />
+              <span class="slider" aria-hidden="true">
+                <span class="switch-icon switch-icon-sun">
+                  <svg viewBox="0 0 24 24" role="presentation">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"></path>
+                  </svg>
+                </span>
+                <span class="switch-icon switch-icon-moon">
+                  <svg viewBox="0 0 24 24" role="presentation">
+                    <path d="M20 15.2A8 8 0 0 1 8.8 4a8.3 8.3 0 1 0 11.2 11.2Z"></path>
+                  </svg>
+                </span>
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
-      <p>Sube tu media, configura por grupos y procesa sin salir de la misma vista de trabajo.</p>
     </header>
 
     <div class="workspace-layout">
-      <aside class="card sidebar-menu" aria-label="Configuraciones">
+      <aside class="card sidebar-menu" aria-label="Ajustes" data-i18n-aria-label="settingsAria">
         <div class="sidebar-head">
-          <div class="sidebar-title">Panel de configuracion</div>
-          <div class="sidebar-sub">Opciones agrupadas por objetivo</div>
+          <div class="sidebar-title" data-i18n="sidebarTitle">Ajustes</div>
+          <div class="sidebar-sub" data-i18n="sidebarSub">Configura el resultado antes de descargar.</div>
         </div>
 
         <div class="menu-groups">
@@ -45,18 +64,22 @@
                 </svg>
               </span>
               <span class="group-copy">
-                <span class="group-title">Fondo y color</span>
-                <span class="group-sub">Define el padding del lienzo</span>
+                <span class="tooltip-label">
+                  <span class="group-title" data-i18n="groupBackground">Fondo y color</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="groupBackgroundTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="groupBackground" data-tooltip="Elige el color de fondo del lienzo." tabindex="0" aria-label="Más información sobre Fondo y color">i</span>
+                </span>
               </span>
             </summary>
             <div class="group-body">
               <label id="paddingField" class="field">
-                <span>Padding (HEX)</span>
+                <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldBackground">Color de fondo</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldBackgroundTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldBackground" data-tooltip="Usa un color HEX para rellenar el fondo." tabindex="0" aria-label="Más información sobre Color de fondo">i</span>
+                </span>
                 <div class="inline">
                   <input id="colorPicker" type="color" value="#ffffff" />
                   <input id="colorHex" type="text" value="#ffffff" maxlength="7" />
                 </div>
-                <small class="hint">Ej: #ffffff</small>
               </label>
             </div>
           </details>
@@ -69,13 +92,18 @@
                 </svg>
               </span>
               <span class="group-copy">
-                <span class="group-title">Salida y descarga</span>
-                <span class="group-sub">Formato final y tipo de entrega</span>
+                <span class="tooltip-label">
+                  <span class="group-title" data-i18n="groupOutput">Salida y descarga</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="groupOutputTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="groupOutput" data-tooltip="Define el formato y cómo se descargan los archivos." tabindex="0" aria-label="Más información sobre Salida y descarga">i</span>
+                </span>
               </span>
             </summary>
             <div class="group-body">
               <label class="field">
-                <span>Formato salida</span>
+                <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldFormat">Formato</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldFormatTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldFormat" data-tooltip="Elige el formato final de cada imagen." tabindex="0" aria-label="Más información sobre Formato">i</span>
+                </span>
                 <select id="formatSelect" data-cselect>
                   <option value="png">PNG</option>
                   <option value="jpg">JPG</option>
@@ -84,13 +112,15 @@
               </label>
 
               <label class="field">
-                <span>Modo de descarga</span>
+                <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldDownloadMode">Modo de descarga</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldDownloadModeTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldDownloadMode" data-tooltip="ZIP baja todo junto. Carpeta crea un ZIP con carpeta interna. Separado baja cada archivo por su cuenta." tabindex="0" aria-label="Más información sobre Modo de descarga">i</span>
+                </span>
                 <select id="downloadMode" data-cselect>
-                  <option value="zip">ZIP (recomendado)</option>
-                  <option value="folder">Carpeta</option>
-                  <option value="separate" selected>Archivos por separado</option>
+                  <option value="zip" data-i18n="optionZip">ZIP (recomendado)</option>
+                  <option value="folder" data-i18n="optionFolder">Carpeta</option>
+                  <option value="separate" selected data-i18n="optionSeparate">Archivos por separado</option>
                 </select>
-                <small class="hint">Carpeta descarga un ZIP con carpeta estandar.</small>
               </label>
             </div>
           </details>
@@ -104,30 +134,37 @@
                 </svg>
               </span>
               <span class="group-copy">
-                <span class="group-title">Tamano y margen</span>
-                <span class="group-sub">Control del lienzo cuadrado</span>
+                <span class="tooltip-label">
+                  <span class="group-title" data-i18n="groupSize">Tamaño y margen</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="groupSizeTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="groupSize" data-tooltip="Define el tamaño final y el espacio extra." tabindex="0" aria-label="Más información sobre Tamaño y margen">i</span>
+                </span>
               </span>
             </summary>
             <div class="group-body">
               <label class="field">
-                <span>Tamano final</span>
+                <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldFinalSize">Tamaño final</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldFinalSizeTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldFinalSize" data-tooltip="Auto usa el lado más largo original. Numérico fija el tamaño final." tabindex="0" aria-label="Más información sobre Tamaño final">i</span>
+                </span>
                 <div class="inline">
                   <select id="sizeMode" data-cselect>
-                    <option value="auto">Auto (max lado)</option>
-                    <option value="fixed">Numerico</option>
+                    <option value="auto" data-i18n="optionAuto">Auto</option>
+                    <option value="fixed" data-i18n="optionFixed">Numérico</option>
                   </select>
                   <div id="sizeValueWrap" class="size-value-wrap">
                     <input id="sizeValue" type="number" min="1" max="10000" step="1" value="1080" />
                   </div>
                 </div>
-                <small class="hint">Auto usa el lado mayor original. Numerico fuerza el lado final.</small>
               </label>
 
               <label class="field">
-                <span>Margen (px)</span>
+                <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldMargin">Margen (px)</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldMarginTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldMargin" data-tooltip="Agrega espacio extra usando el mismo color de fondo." tabindex="0" aria-label="Más información sobre Margen">i</span>
+                </span>
                 <div class="inline margin-inline">
                   <input id="marginY" type="number" min="0" max="10000" step="1" value="0" />
-                  <button id="marginClearBtn" class="secondary ghost" type="button">Clear</button>
+                  <button id="marginClearBtn" class="secondary ghost" type="button" data-i18n="clear">Limpiar</button>
                 </div>
               </label>
             </div>
@@ -142,13 +179,15 @@
                 </svg>
               </span>
               <span class="group-copy">
-                <span class="group-title">Flujo</span>
-                <span class="group-sub">Limpieza y control del lote</span>
+                <span class="tooltip-label">
+                  <span class="group-title" data-i18n="groupFlow">Flujo</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="groupFlowTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="groupFlow" data-tooltip="Controla qué pasa después de descargar." tabindex="0" aria-label="Más información sobre Flujo">i</span>
+                </span>
               </span>
             </summary>
             <div class="group-body">
               <label class="toggle" for="autoClean">
-                <span class="toggle-label">Limpiar automaticamente despues de descargar</span>
+                <span class="toggle-label" data-i18n="autoClean">Limpiar al terminar</span>
                 <span class="switch">
                   <input id="autoClean" type="checkbox" checked />
                   <span class="slider" aria-hidden="true"></span>
@@ -161,55 +200,55 @@
       </aside>
 
       <div class="workspace-main">
-        <section class="card quick-panel" aria-label="Acciones de lote">
+        <section class="card quick-panel" aria-label="Acciones" data-i18n-aria-label="actionsAria">
           <div class="quick-panel-grid">
             <div class="row compact">
               <div class="stat">
-                <div class="stat-label">Archivos</div>
+                <div class="stat-label" data-i18n="statsFiles">Archivos</div>
                 <div id="fileCount" class="stat-value">0</div>
               </div>
               <div class="stat small">
-                <div class="stat-label">Tamano</div>
+                <div class="stat-label" data-i18n="statsSize">Tamaño</div>
                 <div id="totalSize" class="stat-value">0 MB</div>
               </div>
             </div>
 
             <div class="actions">
-              <button id="processBtn" class="primary" disabled>Descargar</button>
-              <button id="downloadSelectedBtn" class="secondary" type="button" disabled>Descargar selección</button>
-              <button id="cleanBtn" class="secondary" type="button">Clean</button>
+              <button id="processBtn" class="primary" disabled data-i18n="downloadAll">Descargar</button>
+              <button id="downloadSelectedBtn" class="secondary" type="button" disabled data-i18n="downloadSelected">Descargar selección</button>
+              <button id="cleanBtn" class="secondary" type="button" data-i18n="clear">Limpiar</button>
             </div>
           </div>
           <div id="status" class="status" aria-live="polite"></div>
         </section>
 
-        <section class="card media-zone" aria-label="Media zone">
+        <section class="card media-zone" aria-label="Archivos" data-i18n-aria-label="filesAria">
 
           <div id="dropzone" class="dropzone" tabindex="0" role="button"
-            aria-label="Arrastra imagenes aqui o haz click para seleccionar">
+            aria-label="Arrastra imágenes aquí o haz clic para seleccionar" data-i18n-aria-label="dropzoneAria">
             <div class="dz-inner">
-              <div class="dz-title">Arrastra y suelta imagenes aqui</div>
-              <div class="dz-sub">o haz click para seleccionarlas. Todo se previsualiza en este panel.</div>
+              <div class="dz-title" data-i18n="dropzoneTitle">Arrastra imágenes aquí</div>
+              <div class="dz-sub" data-i18n="dropzoneSub">o haz clic para elegir archivos.</div>
             </div>
             <input id="fileInput" type="file" accept="image/*" multiple hidden />
           </div>
 
           <div class="media-grid">
-            <div class="preview card-soft" aria-label="Preview procesado">
+            <div class="preview card-soft" aria-label="Vista previa" data-i18n-aria-label="previewAria">
               <div class="preview-head">
-                <div class="preview-title">Preview procesado</div>
-                <div class="preview-sub">Resultado final de la primera imagen en el orden actual.</div>
+                <div class="preview-title" data-i18n="previewTitle">Vista previa</div>
+                <div class="preview-sub" data-i18n="previewSub">Muestra el resultado de la primera imagen.</div>
               </div>
               <div class="preview-box">
-                <div id="previewPlaceholder" class="preview-placeholder">Sube imagenes para ver el preview.</div>
-                <img id="previewImg" class="preview-img" alt="Preview" />
+                <div id="previewPlaceholder" class="preview-placeholder" data-i18n="previewEmpty">La vista previa aparecerá aquí.</div>
+                <img id="previewImg" class="preview-img" alt="Vista previa" data-i18n-alt="previewTitle" />
               </div>
             </div>
 
             <div class="filelist card-soft">
               <div class="filelist-head">
-                <div class="filelist-title">Preview de toda la media</div>
-                <div class="filelist-sub">Arrastra para reordenar o elimina. El orden afecta preview y descargas.</div>
+                <div class="filelist-title" data-i18n="loadedFilesTitle">Archivos cargados</div>
+                <div class="filelist-sub" data-i18n="loadedFilesSub">Arrastra para ordenar o elimina los que no necesites.</div>
               </div>
               <div id="fileList" class="filelist-items"></div>
             </div>
@@ -219,7 +258,7 @@
     </div>
 
     <footer class="footer">
-      <a href="/health" target="_blank" rel="noreferrer">health</a>
+      <a href="/health" target="_blank" rel="noreferrer" data-i18n="footerHealth">health</a>
     </footer>
   </main>
 
