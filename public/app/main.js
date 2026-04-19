@@ -2,7 +2,8 @@ import { DOWNLOAD_PARALLEL_REQUESTS, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from 
 import { createItemsStore } from "./state/items-store.js";
 import { createBackgroundRemovalService } from "./services/background-removal.js";
 import { createProcessApi } from "./services/api-client.js";
-import { triggerDownload } from "./services/download.js";
+import { createBlobUploadService } from "./services/blob-upload.js";
+import { downloadBlobFromUrl, triggerDownload } from "./services/download.js";
 import { createI18n } from "./i18n.js";
 import { refreshCustomSelects, setupCustomSelects } from "./ui/custom-select.js";
 import { createFileListView } from "./ui/file-list-view.js";
@@ -69,6 +70,9 @@ function getUiRefs() {
   const store = createItemsStore();
   const statusView = createStatusView(ui.statusEl);
   const backgroundRemovalService = createBackgroundRemovalService();
+  const blobUploadService = createBlobUploadService({
+    getEffectiveFile: backgroundRemovalService.getEffectiveFile
+  });
   const api = createProcessApi();
   let thumbsTimer = null;
   let thumbsSeq = 0;
@@ -144,11 +148,23 @@ function getUiRefs() {
     container: ui.fileListEl,
     formatBytes: bytesToNice,
     t,
-    onRemove: (index) => {
+    onRemove: async (index) => {
+      const item = store.getItems()[index];
+      if (!item) return;
       if (!store.removeAt(index)) return;
       refreshUi({ schedulePreview: true });
       scheduleThumbsUpdate();
       statusView.setStatus(store.getItems().length ? t("toastItemRemoved") : t("toastListEmpty"));
+
+      try {
+        await blobUploadService.cleanupItems([item]);
+        item.sourceUpload = null;
+        item.removeBgUpload = null;
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(error);
+        statusView.setStatus(error && error.message ? error.message : t("toastStorageCleanupFailed"), "error");
+      }
     },
     onMove: (from, to) => {
       if (!store.moveItem(from, to)) return;
@@ -233,7 +249,7 @@ function getUiRefs() {
     previewPlaceholder: ui.previewPlaceholder,
     getItems: store.getItems,
     getSettingsOrThrow,
-    getEffectiveFile: backgroundRemovalService.getEffectiveFile,
+    getProcessSource: blobUploadService.ensureSourceUpload,
     fetchSingle: api.fetchSingle,
     t
   });
@@ -320,9 +336,9 @@ function getUiRefs() {
         if (item.processedThumbUrl && item.processedThumbKey === itemKey) continue;
 
         try {
-          const thumbFile = await backgroundRemovalService.getEffectiveFile(item, settings);
+          const source = await blobUploadService.ensureSourceUpload(item, settings);
           const { blob } = await api.fetchSingle({
-            file: thumbFile,
+            source,
             color: settings.color,
             format: settings.format,
             sizeMode: "fixed",
@@ -392,7 +408,8 @@ function getUiRefs() {
     });
   }
 
-  function cleanAll({ silent = false } = {}) {
+  async function cleanAll({ silent = false } = {}) {
+    const itemsSnapshot = store.getItems().slice();
     thumbsSeq += 1;
     if (thumbsTimer) {
       clearTimeout(thumbsTimer);
@@ -407,7 +424,19 @@ function getUiRefs() {
     ui.fileInput.value = "";
     previewController.reset();
     refreshUi();
-    if (!silent) statusView.setStatus(t("toastListCleared"), "ok");
+
+    try {
+      await blobUploadService.cleanupItems(itemsSnapshot);
+      itemsSnapshot.forEach((item) => {
+        item.sourceUpload = null;
+        item.removeBgUpload = null;
+      });
+      if (!silent) statusView.setStatus(t("toastListCleared"), "ok");
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(error);
+      statusView.setStatus(error && error.message ? error.message : t("toastStorageCleanupFailed"), "error");
+    }
   }
 
   function addFiles(fileList) {
@@ -419,9 +448,9 @@ function getUiRefs() {
   }
 
   async function downloadZip(settings, zipMode, items) {
-    const blob = await api.fetchZip({
+    const remoteFile = await api.createZipDownload({
       items,
-      getEffectiveFile: backgroundRemovalService.getEffectiveFile,
+      getProcessSource: blobUploadService.ensureSourceUpload,
       onItemStart: (index, total) => {
         if (settings.removeBg) statusView.setStatus(t("toastRemovingBg", { current: index + 1, total }));
       },
@@ -434,7 +463,12 @@ function getUiRefs() {
       removeBg: settings.removeBg
     });
 
-    triggerDownload(blob, "bulk-square-results.zip");
+    try {
+      const blob = await downloadBlobFromUrl(remoteFile.downloadUrl || remoteFile.url);
+      triggerDownload(blob, remoteFile.filename || "bulk-square-results.zip");
+    } finally {
+      await blobUploadService.cleanupUrls([remoteFile.url]);
+    }
   }
 
   async function downloadSeparate(settings, items) {
@@ -446,8 +480,8 @@ function getUiRefs() {
     statusView.setStatus(t("toastPreparingFiles", { current: 0, total }));
 
     const runOne = async (index) => {
-      const result = await api.fetchSingle({
-        file: await backgroundRemovalService.getEffectiveFile(items[index], settings),
+      const result = await api.createSingleDownload({
+        source: await blobUploadService.ensureSourceUpload(items[index], settings),
         color: settings.color,
         format: settings.format,
         sizeMode: settings.sizeMode,
@@ -487,9 +521,14 @@ function getUiRefs() {
         total,
         settings.marginY
       );
-      triggerDownload(ready.blob, filename);
-      triggered += 1;
-      statusView.setStatus(t("toastStartingDownload", { current: triggered, total }));
+      try {
+        const blob = await downloadBlobFromUrl(ready.downloadUrl || ready.url);
+        triggerDownload(blob, filename);
+        triggered += 1;
+        statusView.setStatus(t("toastStartingDownload", { current: triggered, total }));
+      } finally {
+        await blobUploadService.cleanupUrls([ready.url]);
+      }
 
       if (index > 0) {
         await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_TRIGGER_INTERVAL_MS));
@@ -585,7 +624,7 @@ function getUiRefs() {
     }
 
     ui.cleanBtn.addEventListener("click", () => {
-      cleanAll();
+      void cleanAll();
     });
 
     if (ui.languageSelect) {
@@ -620,7 +659,7 @@ function getUiRefs() {
           statusView.setStatus(t("toastDownloadStarted"), "ok");
         }
 
-        if (!selectedOnly && settings.shouldAutoClean) cleanAll({ silent: true });
+        if (!selectedOnly && settings.shouldAutoClean) await cleanAll({ silent: true });
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error(error);

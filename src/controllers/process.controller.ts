@@ -2,9 +2,15 @@ import { Request, Response } from "express";
 import archiver from "archiver";
 import { HttpError } from "../errors/http-error";
 import { processOneImage } from "../services/image-processor.service";
-import { parseBatchOptions, parseSingleOptions } from "../services/process-request.service";
+import {
+  createPublicDownloadUploadStream,
+  downloadPrivateBlobToBuffer,
+  uploadPublicDownloadBuffer
+} from "../services/blob-storage.service";
+import { parseBatchOptions, parseBatchSources, parseSingleOptions, parseSingleSource } from "../services/process-request.service";
 import { extractClientOrderMarker, sanitizeBaseName } from "../utils/file-name";
 import { outContentType } from "../utils/http";
+import { BlobProcessSource } from "../types/process";
 
 function asBody(input: unknown): Record<string, unknown> {
   if (input && typeof input === "object") return input as Record<string, unknown>;
@@ -21,19 +27,96 @@ function respondError(err: unknown, res: Response): Response {
   return res.status(500).json({ error: "Processing failed." });
 }
 
+interface BatchInputDescriptor {
+  index: number;
+  order: number;
+  cleanName: string;
+  getBuffer: () => Promise<Buffer>;
+}
+
+interface SingleInputDescriptor {
+  cleanName: string;
+  getBuffer: () => Promise<Buffer>;
+}
+
+function getResponseMode(body: Record<string, unknown>): "inline" | "blob" {
+  const value = String(body.responseMode ?? "inline").trim().toLowerCase();
+  return value === "blob" ? "blob" : "inline";
+}
+
+function toBatchInputDescriptor(source: BlobProcessSource, index: number): BatchInputDescriptor {
+  return {
+    index,
+    order: index + 1,
+    cleanName: source.originalName,
+    getBuffer: async () => downloadPrivateBlobToBuffer(source.blobUrl)
+  };
+}
+
+function resolveBatchInputs(req: Request): BatchInputDescriptor[] {
+  const files = req.files as Express.Multer.File[] | undefined;
+  if (files && files.length > 0) {
+    return files
+      .map((file, index) => {
+        const { order, cleanName } = extractClientOrderMarker(file.originalname);
+        return {
+          index,
+          order: order ?? index + 1,
+          cleanName,
+          getBuffer: async () => file.buffer
+        };
+      })
+      .sort((a, b) => (a.order - b.order) || (a.index - b.index));
+  }
+
+  return parseBatchSources(asBody(req.body))
+    .map(toBatchInputDescriptor)
+    .sort((a, b) => (a.order - b.order) || (a.index - b.index));
+}
+
+function resolveSingleInput(req: Request): SingleInputDescriptor {
+  const file = req.file as Express.Multer.File | undefined;
+  if (file) {
+    const { cleanName } = extractClientOrderMarker(file.originalname);
+    return {
+      cleanName,
+      getBuffer: async () => file.buffer
+    };
+  }
+
+  const source = parseSingleSource(asBody(req.body));
+  return {
+    cleanName: source.originalName,
+    getBuffer: async () => downloadPrivateBlobToBuffer(source.blobUrl)
+  };
+}
+
 export async function processBatchController(req: Request, res: Response): Promise<Response | void> {
   try {
-    const files = req.files as Express.Multer.File[] | undefined;
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No images uploaded. Field name must be 'images'." });
+    const body = asBody(req.body);
+    const orderedFiles = resolveBatchInputs(req);
+    if (orderedFiles.length === 0) {
+      return res.status(400).json({ error: "No images provided." });
     }
 
-    const options = parseBatchOptions(asBody(req.body));
+    const options = parseBatchOptions(body);
+    const responseMode = getResponseMode(body);
+    const filename = "bulk-square-results.zip";
+    const shouldReturnBlobReference = responseMode === "blob";
 
-    res.status(200);
-    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", "attachment; filename=\"bulk-square-results.zip\"");
+    let archiveUpload:
+      | {
+        stream: NodeJS.WritableStream;
+        upload: Promise<{ url: string; downloadUrl: string; filename: string }>;
+      }
+      | null = null;
+
+    if (!shouldReturnBlobReference) {
+      res.status(200);
+      res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    }
 
     const archive = archiver("zip", { zlib: { level: 1 } });
     archive.on("warning", (err) => {
@@ -49,24 +132,24 @@ export async function processBatchController(req: Request, res: Response): Promi
         // ignore
       }
     });
-    archive.pipe(res);
+
+    if (shouldReturnBlobReference) {
+      archiveUpload = createPublicDownloadUploadStream(filename, "application/zip");
+      archive.pipe(archiveUpload.stream);
+    } else {
+      archive.pipe(res);
+    }
 
     const zipGeneratedAt = new Date();
     const folderPrefix = options.downloadMode === "folder" ? "bulk-square-results/" : "";
 
-    const orderedFiles = files
-      .map((file, index) => {
-        const { order, cleanName } = extractClientOrderMarker(file.originalname);
-        return { file, index, order: order ?? index + 1, cleanName };
-      })
-      .sort((a, b) => (a.order - b.order) || (a.index - b.index));
-
     const padLen = String(orderedFiles.length).length;
 
     for (let i = 0; i < orderedFiles.length; i++) {
-      const { file, cleanName } = orderedFiles[i];
+      const { cleanName, getBuffer } = orderedFiles[i];
+      const input = await getBuffer();
       const { outputBuffer, squareSize, outExt } = await processOneImage({
-        input: file.buffer,
+        input,
         ...options
       });
 
@@ -78,6 +161,11 @@ export async function processBatchController(req: Request, res: Response): Promi
     }
 
     await archive.finalize();
+
+    if (archiveUpload) {
+      const uploaded = await archiveUpload.upload;
+      return res.status(200).json(uploaded);
+    }
   } catch (err) {
     return respondError(err, res);
   }
@@ -85,24 +173,37 @@ export async function processBatchController(req: Request, res: Response): Promi
 
 export async function processSingleController(req: Request, res: Response): Promise<Response | void> {
   try {
+    const body = asBody(req.body);
     const file = req.file as Express.Multer.File | undefined;
-    if (!file) {
-      return res.status(400).json({ error: "No image uploaded. Field name must be 'image'." });
+    if (!file && !String(body.blobUrl ?? "").trim()) {
+      return res.status(400).json({ error: "No image provided." });
     }
 
-    const options = parseSingleOptions(asBody(req.body));
+    const options = parseSingleOptions(body);
     const padLen = String(options.orderTotal).length;
+    const { cleanName, getBuffer } = resolveSingleInput(req);
+    const input = await getBuffer();
 
     const { outputBuffer, squareSize, outExt } = await processOneImage({
-      input: file.buffer,
+      input,
       ...options
     });
 
-    const { cleanName } = extractClientOrderMarker(file.originalname);
     const baseName = sanitizeBaseName(cleanName);
     const orderPrefix = String(options.order).padStart(padLen, "0");
     const marginSuffix = options.marginY > 0 ? `_my${options.marginY}` : "";
     const outName = `${orderPrefix}_${baseName}_square_${squareSize}${marginSuffix}.${outExt}`;
+    const responseMode = getResponseMode(body);
+
+    if (responseMode === "blob") {
+      const uploaded = await uploadPublicDownloadBuffer(
+        outName,
+        outputBuffer,
+        outContentType(options.format)
+      );
+
+      return res.status(200).json(uploaded);
+    }
 
     res.status(200);
     res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");

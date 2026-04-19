@@ -7,7 +7,7 @@ export function createPreviewController({
   previewPlaceholder,
   getItems,
   getSettingsOrThrow,
-  getEffectiveFile,
+  getProcessSource,
   fetchSingle,
   t
 }) {
@@ -77,15 +77,14 @@ export function createPreviewController({
     setPreviewState({ text: t("previewGenerating"), hasImage: false });
 
     try {
-      const previewFile = settings.removeBg
-        ? await (async () => {
-          setPreviewState({ text: t("previewRemovingBg"), hasImage: false });
-          return getEffectiveFile(firstItem, settings);
-        })()
-        : firstItem.file;
+      if (settings.removeBg) {
+        setPreviewState({ text: t("previewRemovingBg"), hasImage: false });
+      }
+
+      const previewSource = await getProcessSource(firstItem, settings);
 
       const { blob } = await fetchSingle({
-        file: previewFile,
+        source: previewSource,
         color: settings.color,
         format: settings.format,
         sizeMode: settings.sizeMode,

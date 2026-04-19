@@ -1,12 +1,16 @@
 import { parseFilenameFromContentDisposition } from "../utils/file.js";
 
-function appendCommonFields(formData, { color, format, sizeMode, sizeValue, marginY, removeBg }) {
-  formData.append("color", color);
-  formData.append("format", format);
-  formData.append("sizeMode", sizeMode);
-  if (sizeMode === "fixed") formData.append("size", String(sizeValue));
-  formData.append("margin", String(marginY || 0));
-  formData.append("removeBg", removeBg ? "1" : "0");
+function createCommonPayload({ color, format, sizeMode, sizeValue, marginY, removeBg }) {
+  const payload = {
+    color,
+    format,
+    sizeMode,
+    margin: String(marginY || 0),
+    removeBg: removeBg ? "1" : "0"
+  };
+
+  if (sizeMode === "fixed") payload.size = String(sizeValue);
+  return payload;
 }
 
 async function extractError(response) {
@@ -22,34 +26,48 @@ async function extractError(response) {
 }
 
 export function createProcessApi() {
-  async function fetchZip({ items, getEffectiveFile, onItemStart, color, format, sizeMode, sizeValue, marginY, zipMode, removeBg }) {
-    const formData = new FormData();
-    const padLen = String(items.length).length;
+  async function createZipDownload({ items, getProcessSource, onItemStart, color, format, sizeMode, sizeValue, marginY, zipMode, removeBg }) {
+    const payloadItems = [];
 
     for (let index = 0; index < items.length; index++) {
       if (onItemStart) onItemStart(index, items.length);
-      const item = items[index];
-      const prefix = String(index + 1).padStart(padLen, "0");
-      const fileForUpload = await getEffectiveFile(item, { removeBg });
-      formData.append("images", fileForUpload, `__o${prefix}__${fileForUpload.name}`);
+      const source = await getProcessSource(items[index], { removeBg });
+      payloadItems.push({
+        blobUrl: source.url,
+        originalName: source.originalName
+      });
     }
 
-    appendCommonFields(formData, { color, format, sizeMode, sizeValue, marginY, removeBg });
-    formData.append("downloadMode", zipMode);
-
-    const response = await fetch("/api/process", { method: "POST", body: formData });
+    const response = await fetch("/api/process", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...createCommonPayload({ color, format, sizeMode, sizeValue, marginY, removeBg }),
+        downloadMode: zipMode,
+        responseMode: "blob",
+        items: payloadItems
+      })
+    });
     if (!response.ok) throw new Error(await extractError(response));
-    return response.blob();
+    return response.json();
   }
 
-  async function fetchSingle({ file, color, format, sizeMode, sizeValue, marginY, order, orderTotal, removeBg }) {
-    const formData = new FormData();
-    formData.append("image", file, file.name);
-    appendCommonFields(formData, { color, format, sizeMode, sizeValue, marginY, removeBg });
-    formData.append("order", String(order));
-    formData.append("orderTotal", String(orderTotal));
-
-    const response = await fetch("/api/process-single", { method: "POST", body: formData });
+  async function fetchSingle({ source, color, format, sizeMode, sizeValue, marginY, order, orderTotal, removeBg }) {
+    const response = await fetch("/api/process-single", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...createCommonPayload({ color, format, sizeMode, sizeValue, marginY, removeBg }),
+        blobUrl: source.url,
+        originalName: source.originalName,
+        order: String(order),
+        orderTotal: String(orderTotal)
+      })
+    });
     if (!response.ok) throw new Error(await extractError(response));
 
     const blob = await response.blob();
@@ -57,8 +75,28 @@ export function createProcessApi() {
     return { blob, filename };
   }
 
+  async function createSingleDownload({ source, color, format, sizeMode, sizeValue, marginY, order, orderTotal, removeBg }) {
+    const response = await fetch("/api/process-single", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...createCommonPayload({ color, format, sizeMode, sizeValue, marginY, removeBg }),
+        responseMode: "blob",
+        blobUrl: source.url,
+        originalName: source.originalName,
+        order: String(order),
+        orderTotal: String(orderTotal)
+      })
+    });
+    if (!response.ok) throw new Error(await extractError(response));
+    return response.json();
+  }
+
   return {
-    fetchZip,
+    createSingleDownload,
+    createZipDownload,
     fetchSingle
   };
 }

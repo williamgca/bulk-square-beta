@@ -11,3 +11,12 @@ export function triggerDownload(blob, filename) {
     URL.revokeObjectURL(url);
   }, 10 * 60 * 1000);
 }
+
+export async function downloadBlobFromUrl(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Error ${response.status}`);
+  }
+
+  return response.blob();
+}

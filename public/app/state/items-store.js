@@ -25,6 +25,10 @@ export function createItemsStore() {
       file,
       url: URL.createObjectURL(file),
       removeBgFile: null,
+      sourceUpload: null,
+      sourceUploadPromise: null,
+      removeBgUpload: null,
+      removeBgUploadPromise: null,
       processedThumbUrl: null,
       processedThumbKey: null,
       selected: false

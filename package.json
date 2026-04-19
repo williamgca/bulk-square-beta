@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",
+    "@vercel/blob": "^2.3.3",
     "archiver": "^6.0.2",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",

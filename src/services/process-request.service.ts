@@ -2,7 +2,14 @@ import { DEFAULT_COLOR, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from "../config/pr
 import { HttpError } from "../errors/http-error";
 import { parseBool } from "../utils/booleans";
 import { hexToRgb, isHexColor } from "../utils/color";
-import { DownloadMode, OutputFormat, ParsedBatchOptions, ParsedProcessOptions, SizeMode } from "../types/process";
+import {
+  BlobProcessSource,
+  DownloadMode,
+  OutputFormat,
+  ParsedBatchOptions,
+  ParsedProcessOptions,
+  SizeMode
+} from "../types/process";
 
 interface SingleRequestExtra {
   order: number;
@@ -80,4 +87,36 @@ export function parseSingleOptions(body: Record<string, unknown>): ParsedSingleO
     order,
     orderTotal
   };
+}
+
+function parseBlobSource(input: unknown, position: number): BlobProcessSource {
+  if (!input || typeof input !== "object") {
+    throw new HttpError(`Invalid image source at position ${position}.`, 400);
+  }
+
+  const value = input as Record<string, unknown>;
+  const blobUrl = String(value.blobUrl ?? "").trim();
+  const originalName = String(value.originalName ?? "").trim() || "image";
+
+  if (!blobUrl) {
+    throw new HttpError(`Invalid blob URL at position ${position}.`, 400);
+  }
+
+  return { blobUrl, originalName };
+}
+
+export function parseBatchSources(body: Record<string, unknown>): BlobProcessSource[] {
+  const items = body.items;
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new HttpError("No images provided.", 400);
+  }
+
+  return items.map((item, index) => parseBlobSource(item, index + 1));
+}
+
+export function parseSingleSource(body: Record<string, unknown>): BlobProcessSource {
+  return parseBlobSource({
+    blobUrl: body.blobUrl,
+    originalName: body.originalName
+  }, 1);
 }

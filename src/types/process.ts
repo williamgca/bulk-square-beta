@@ -37,3 +37,8 @@ export interface ParsedProcessOptions {
 export interface ParsedBatchOptions extends ParsedProcessOptions {
   downloadMode: DownloadMode;
 }
+
+export interface BlobProcessSource {
+  blobUrl: string;
+  originalName: string;
+}
