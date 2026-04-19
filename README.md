@@ -29,7 +29,7 @@ Configuración mínima:
 Flujo actual:
 - El navegador sube cada imagen a Vercel Blob mediante `client uploads`.
 - El backend procesa leyendo el archivo privado desde Blob.
-- Las descargas grandes ya no salen como body de la Function: el backend sube el resultado final a un blob temporal y el navegador lo descarga desde ahí.
+- Las descargas se guardan temporalmente en Blob privado y se sirven por una ruta backend que las streamea al navegador.
 - Los blobs de salida se borran automáticamente después de iniciar la descarga, y los blobs de entrada se limpian al usar **Limpiar** o **Limpiar al terminar**.
 
 ## Build + Producción

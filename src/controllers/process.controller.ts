@@ -3,9 +3,9 @@ import archiver from "archiver";
 import { HttpError } from "../errors/http-error";
 import { processOneImage } from "../services/image-processor.service";
 import {
-  createPublicDownloadUploadStream,
+  createPrivateDownloadUploadStream,
   downloadPrivateBlobToBuffer,
-  uploadPublicDownloadBuffer
+  uploadPrivateDownloadBuffer
 } from "../services/blob-storage.service";
 import { parseBatchOptions, parseBatchSources, parseSingleOptions, parseSingleSource } from "../services/process-request.service";
 import { extractClientOrderMarker, sanitizeBaseName } from "../utils/file-name";
@@ -107,7 +107,7 @@ export async function processBatchController(req: Request, res: Response): Promi
     let archiveUpload:
       | {
         stream: NodeJS.WritableStream;
-        upload: Promise<{ url: string; downloadUrl: string; filename: string }>;
+        upload: Promise<{ url: string; filename: string }>;
       }
       | null = null;
 
@@ -134,7 +134,7 @@ export async function processBatchController(req: Request, res: Response): Promi
     });
 
     if (shouldReturnBlobReference) {
-      archiveUpload = createPublicDownloadUploadStream(filename, "application/zip");
+      archiveUpload = createPrivateDownloadUploadStream(filename, "application/zip");
       archive.pipe(archiveUpload.stream);
     } else {
       archive.pipe(res);
@@ -196,7 +196,7 @@ export async function processSingleController(req: Request, res: Response): Prom
     const responseMode = getResponseMode(body);
 
     if (responseMode === "blob") {
-      const uploaded = await uploadPublicDownloadBuffer(
+      const uploaded = await uploadPrivateDownloadBuffer(
         outName,
         outputBuffer,
         outContentType(options.format)

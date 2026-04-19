@@ -464,7 +464,7 @@ function getUiRefs() {
     });
 
     try {
-      const blob = await downloadBlobFromUrl(remoteFile.downloadUrl || remoteFile.url);
+      const blob = await downloadBlobFromUrl(remoteFile.url, remoteFile.filename);
       triggerDownload(blob, remoteFile.filename || "bulk-square-results.zip");
     } finally {
       await blobUploadService.cleanupUrls([remoteFile.url]);
@@ -522,7 +522,7 @@ function getUiRefs() {
         settings.marginY
       );
       try {
-        const blob = await downloadBlobFromUrl(ready.downloadUrl || ready.url);
+        const blob = await downloadBlobFromUrl(ready.url, filename);
         triggerDownload(blob, filename);
         triggered += 1;
         statusView.setStatus(t("toastStartingDownload", { current: triggered, total }));

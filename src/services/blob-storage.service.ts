@@ -5,8 +5,13 @@ import { HttpError } from "../errors/http-error";
 
 interface UploadedDownloadBlob {
   url: string;
-  downloadUrl: string;
   filename: string;
+}
+
+interface PrivateBlobStreamResult {
+  stream: ReadableStream<Uint8Array>;
+  contentType: string;
+  etag: string;
 }
 
 function normalizeBlobUrls(urls: string[]): string[] {
@@ -53,6 +58,21 @@ export async function downloadPrivateBlobToBuffer(blobUrl: string): Promise<Buff
   return Buffer.from(arrayBuffer);
 }
 
+export async function getPrivateBlobStream(blobUrl: string): Promise<PrivateBlobStreamResult> {
+  assertBlobConfigured();
+
+  const result = await get(blobUrl, { access: "private" });
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    throw new HttpError("Blob not found in storage.", 404);
+  }
+
+  return {
+    stream: result.stream,
+    contentType: result.blob.contentType,
+    etag: result.blob.etag
+  };
+}
+
 export async function deleteBlobUrls(urls: string[]): Promise<number> {
   assertBlobConfigured();
 
@@ -63,7 +83,7 @@ export async function deleteBlobUrls(urls: string[]): Promise<number> {
   return normalized.length;
 }
 
-export async function uploadPublicDownloadBuffer(
+export async function uploadPrivateDownloadBuffer(
   filename: string,
   body: Buffer,
   contentType: string
@@ -72,7 +92,7 @@ export async function uploadPublicDownloadBuffer(
 
   const safeFilename = sanitizeDownloadFilename(filename);
   const blob = await put(createDownloadPathname(safeFilename), body, {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
     cacheControlMaxAge: 60,
     contentType
@@ -80,12 +100,11 @@ export async function uploadPublicDownloadBuffer(
 
   return {
     url: blob.url,
-    downloadUrl: blob.downloadUrl,
     filename: safeFilename
   };
 }
 
-export function createPublicDownloadUploadStream(filename: string, contentType: string): {
+export function createPrivateDownloadUploadStream(filename: string, contentType: string): {
   stream: PassThrough;
   upload: Promise<UploadedDownloadBlob>;
 } {
@@ -94,13 +113,12 @@ export function createPublicDownloadUploadStream(filename: string, contentType: 
   const safeFilename = sanitizeDownloadFilename(filename);
   const stream = new PassThrough();
   const upload = put(createDownloadPathname(safeFilename), stream, {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
     cacheControlMaxAge: 60,
     contentType
   }).then((blob) => ({
     url: blob.url,
-    downloadUrl: blob.downloadUrl,
     filename: safeFilename
   }));
 

@@ -12,8 +12,9 @@ export function triggerDownload(blob, filename) {
   }, 10 * 60 * 1000);
 }
 
-export async function downloadBlobFromUrl(url) {
-  const response = await fetch(url);
+export async function downloadBlobFromUrl(url, filename) {
+  const downloadUrl = `/api/blob/download?url=${encodeURIComponent(url)}${filename ? `&filename=${encodeURIComponent(filename)}` : ""}`;
+  const response = await fetch(downloadUrl);
   if (!response.ok) {
     throw new Error(`Error ${response.status}`);
   }

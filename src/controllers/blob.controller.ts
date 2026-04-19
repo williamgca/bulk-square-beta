@@ -1,7 +1,8 @@
+import { Readable } from "node:stream";
 import { Request, Response } from "express";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { HttpError } from "../errors/http-error";
-import { assertBlobConfigured, deleteBlobUrls } from "../services/blob-storage.service";
+import { assertBlobConfigured, deleteBlobUrls, getPrivateBlobStream } from "../services/blob-storage.service";
 
 const BLOB_UPLOAD_PREFIX = "bulk-square/uploads/";
 const MAX_BLOB_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
@@ -75,6 +76,31 @@ export async function blobCleanupController(req: Request, res: Response): Promis
     const urls = parseCleanupUrls(asBody(req.body));
     const deleted = await deleteBlobUrls(urls);
     return res.status(200).json({ ok: true, deleted });
+  } catch (err) {
+    return respondError(err, res);
+  }
+}
+
+export async function blobDownloadController(req: Request, res: Response): Promise<Response | void> {
+  try {
+    const blobUrl = String(req.query.url || "").trim();
+    if (!blobUrl) {
+      return res.status(400).json({ error: "Missing blob url." });
+    }
+
+    const filename = String(req.query.filename || "").trim();
+    const blob = await getPrivateBlobStream(blobUrl);
+
+    res.status(200);
+    res.setHeader("Content-Type", blob.contentType || "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "private, no-cache");
+    res.setHeader("ETag", blob.etag);
+    if (filename) {
+      res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"`);
+    }
+
+    Readable.fromWeb(blob.stream).pipe(res);
   } catch (err) {
     return respondError(err, res);
   }
