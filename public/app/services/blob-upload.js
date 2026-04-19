@@ -1,6 +1,25 @@
-import { upload } from "/vendor/vercel-blob/client.js";
 import { MULTIPART_UPLOAD_THRESHOLD_BYTES } from "../config.js";
 import { sanitizeBaseName } from "../utils/file.js";
+
+let uploadPromise = null;
+
+async function getUploadFn() {
+  if (!uploadPromise) {
+    uploadPromise = import("/vendor/vercel-blob/client.js")
+      .then((mod) => {
+        if (typeof mod.upload !== "function") {
+          throw new Error("Vercel Blob client upload is unavailable.");
+        }
+        return mod.upload;
+      })
+      .catch((error) => {
+        uploadPromise = null;
+        throw error;
+      });
+  }
+
+  return uploadPromise;
+}
 
 function getExtension(filename) {
   const match = /\.[^./\\]+$/.exec(String(filename || ""));
@@ -72,6 +91,7 @@ export function createBlobUploadService({ getEffectiveFile }) {
     if (item[promiseKey]) return item[promiseKey];
 
     item[promiseKey] = (async () => {
+      const upload = await getUploadFn();
       const file = await getEffectiveFile(item, settings);
       const blob = await upload(buildBlobPathname(file, item.id, variant), file, {
         access: "private",
