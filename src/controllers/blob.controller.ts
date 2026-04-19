@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { Request, Response } from "express";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { HttpError } from "../errors/http-error";
@@ -100,7 +101,7 @@ export async function blobDownloadController(req: Request, res: Response): Promi
       res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"`);
     }
 
-    Readable.fromWeb(blob.stream).pipe(res);
+    Readable.fromWeb(blob.stream as unknown as NodeReadableStream).pipe(res);
   } catch (err) {
     return respondError(err, res);
   }
