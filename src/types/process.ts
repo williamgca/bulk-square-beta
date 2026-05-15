@@ -1,6 +1,7 @@
 export type OutputFormat = "png" | "jpg" | "webp";
 export type SizeMode = "auto" | "fixed";
 export type DownloadMode = "zip" | "folder";
+export type FilenameMode = "processed" | "original";
 
 export interface RgbaColor {
   r: number;
@@ -32,6 +33,7 @@ export interface ParsedProcessOptions {
   fixedSize: number | null;
   marginY: number;
   removeBg: boolean;
+  filenameMode: FilenameMode;
 }
 
 export interface ParsedBatchOptions extends ParsedProcessOptions {

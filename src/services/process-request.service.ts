@@ -5,6 +5,7 @@ import { hexToRgb, isHexColor } from "../utils/color";
 import {
   BlobProcessSource,
   DownloadMode,
+  FilenameMode,
   OutputFormat,
   ParsedBatchOptions,
   ParsedProcessOptions,
@@ -27,6 +28,11 @@ function parseFormat(value: unknown): OutputFormat {
   const formatRaw = String(value ?? "png").trim().toLowerCase();
   if (formatRaw === "png" || formatRaw === "jpg" || formatRaw === "webp") return formatRaw;
   throw new HttpError("Invalid format. Use png, jpg, or webp.", 400);
+}
+
+function parseFilenameMode(value: unknown): FilenameMode {
+  const normalized = String(value ?? "processed").trim().toLowerCase();
+  return normalized === "original" ? "original" : "processed";
 }
 
 function parseSizeMode(value: unknown): SizeMode {
@@ -66,9 +72,10 @@ function parseSharedOptions(body: Record<string, unknown>): ParsedProcessOptions
   const sizeMode = parseSizeMode(body.sizeMode);
   const fixedSize = parseFixedSize(body.size, sizeMode);
   const marginY = parseMargin(body.margin);
+  const filenameMode = parseFilenameMode(body.filenameMode);
   const background = isHexColor(colorRaw) ? hexToRgb(colorRaw) : hexToRgb(DEFAULT_COLOR);
 
-  return { background, format, sizeMode, fixedSize, marginY, removeBg };
+  return { background, format, sizeMode, fixedSize, marginY, removeBg, filenameMode };
 }
 
 export function parseBatchOptions(body: Record<string, unknown>): ParsedBatchOptions {
@@ -96,7 +103,8 @@ function parseBlobSource(input: unknown, position: number): BlobProcessSource {
 
   const value = input as Record<string, unknown>;
   const blobUrl = String(value.blobUrl ?? "").trim();
-  const originalName = String(value.originalName ?? "").trim() || "image";
+  const originalNameRaw = String(value.originalName ?? "");
+  const originalName = originalNameRaw.trim() ? originalNameRaw : "image";
 
   if (!blobUrl) {
     throw new HttpError(`Invalid blob URL at position ${position}.`, 400);

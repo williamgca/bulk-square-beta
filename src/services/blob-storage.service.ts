@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { del, get, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
+import { BLOB_STORAGE_REQUESTED, MEDIA_STORAGE_MODE } from "../config/process";
 import { HttpError } from "../errors/http-error";
 
 interface UploadedDownloadBlob {
@@ -14,6 +15,16 @@ interface PrivateBlobStreamResult {
   etag: string;
 }
 
+export interface BlobStorageAvailability {
+  enabled: boolean;
+  reason?: string;
+}
+
+const BLOB_AVAILABILITY_CACHE_TTL_MS = 60 * 1000;
+const BLOB_AVAILABILITY_TIMEOUT_MS = 1500;
+let availabilityCache: (BlobStorageAvailability & { checkedAt: number }) | null = null;
+let availabilityPromise: Promise<BlobStorageAvailability> | null = null;
+
 function normalizeBlobUrls(urls: string[]): string[] {
   return Array.from(
     new Set(
@@ -24,7 +35,11 @@ function normalizeBlobUrls(urls: string[]): string[] {
   );
 }
 
-function sanitizeDownloadFilename(filename: string): string {
+function normalizeDownloadFilename(filename: string): string {
+  return String(filename || "download.bin").replace(/[\r\n\u0000]/g, "") || "download.bin";
+}
+
+function sanitizeBlobPathFilename(filename: string): string {
   const trimmed = String(filename || "download.bin").trim();
   const normalized = trimmed
     .replace(/[\\/]+/g, "_")
@@ -36,8 +51,78 @@ function sanitizeDownloadFilename(filename: string): string {
 }
 
 function createDownloadPathname(filename: string): string {
-  const safeFilename = sanitizeDownloadFilename(filename);
+  const safeFilename = sanitizeBlobPathFilename(filename);
   return `bulk-square/downloads/${Date.now()}_${randomUUID()}/${safeFilename}`;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err || "Unknown Vercel Blob error.");
+}
+
+function createDisabledAvailability(reason: string): BlobStorageAvailability & { checkedAt: number } {
+  return {
+    enabled: false,
+    reason,
+    checkedAt: Date.now()
+  };
+}
+
+async function probeBlobStorage(): Promise<BlobStorageAvailability & { checkedAt: number }> {
+  if (!BLOB_STORAGE_REQUESTED) {
+    const reason = MEDIA_STORAGE_MODE === "local"
+      ? "Blob storage is disabled by MEDIA_STORAGE_MODE=local."
+      : "Blob storage is not configured for this runtime.";
+    return createDisabledAvailability(reason);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BLOB_AVAILABILITY_TIMEOUT_MS);
+
+  try {
+    await list({
+      limit: 1,
+      prefix: "bulk-square/",
+      abortSignal: controller.signal
+    });
+
+    return {
+      enabled: true,
+      checkedAt: Date.now()
+    };
+  } catch (err) {
+    const reason = getErrorMessage(err);
+    // eslint-disable-next-line no-console
+    console.warn("Vercel Blob storage is unavailable:", reason);
+    return createDisabledAvailability(reason);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function getBlobStorageAvailability(): Promise<BlobStorageAvailability> {
+  if (availabilityCache && Date.now() - availabilityCache.checkedAt < BLOB_AVAILABILITY_CACHE_TTL_MS) {
+    return {
+      enabled: availabilityCache.enabled,
+      reason: availabilityCache.reason
+    };
+  }
+
+  if (!availabilityPromise) {
+    availabilityPromise = probeBlobStorage()
+      .then((status) => {
+        availabilityCache = status;
+        return {
+          enabled: status.enabled,
+          reason: status.reason
+        };
+      })
+      .finally(() => {
+        availabilityPromise = null;
+      });
+  }
+
+  return availabilityPromise;
 }
 
 export function assertBlobConfigured(): void {
@@ -90,8 +175,8 @@ export async function uploadPrivateDownloadBuffer(
 ): Promise<UploadedDownloadBlob> {
   assertBlobConfigured();
 
-  const safeFilename = sanitizeDownloadFilename(filename);
-  const blob = await put(createDownloadPathname(safeFilename), body, {
+  const downloadFilename = normalizeDownloadFilename(filename);
+  const blob = await put(createDownloadPathname(downloadFilename), body, {
     access: "private",
     addRandomSuffix: false,
     cacheControlMaxAge: 60,
@@ -100,7 +185,7 @@ export async function uploadPrivateDownloadBuffer(
 
   return {
     url: blob.url,
-    filename: safeFilename
+    filename: downloadFilename
   };
 }
 
@@ -110,16 +195,16 @@ export function createPrivateDownloadUploadStream(filename: string, contentType:
 } {
   assertBlobConfigured();
 
-  const safeFilename = sanitizeDownloadFilename(filename);
+  const downloadFilename = normalizeDownloadFilename(filename);
   const stream = new PassThrough();
-  const upload = put(createDownloadPathname(safeFilename), stream, {
+  const upload = put(createDownloadPathname(downloadFilename), stream, {
     access: "private",
     addRandomSuffix: false,
     cacheControlMaxAge: 60,
     contentType
   }).then((blob) => ({
     url: blob.url,
-    filename: safeFilename
+    filename: downloadFilename
   }));
 
   return { stream, upload };

@@ -1,14 +1,16 @@
-import { DOWNLOAD_PARALLEL_REQUESTS, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from "./config.js";
+import { DOWNLOAD_PARALLEL_REQUESTS, MAX_FILES_PER_BATCH, MAX_SIZE, REMOVE_BG_FEATURE_ENABLED } from "./config.js";
 import { createItemsStore } from "./state/items-store.js";
 import { createBackgroundRemovalService } from "./services/background-removal.js";
 import { createProcessApi } from "./services/api-client.js";
-import { createBlobUploadService } from "./services/blob-upload.js";
+import { createMediaSourceService } from "./services/media-source.js";
+import { fetchRuntimeConfig } from "./services/runtime-config.js";
 import { downloadBlobFromUrl, triggerDownload } from "./services/download.js";
 import { createI18n } from "./i18n.js";
 import { refreshCustomSelects, setupCustomSelects } from "./ui/custom-select.js";
 import { createFileListView } from "./ui/file-list-view.js";
 import { createPreviewController } from "./ui/preview-controller.js";
 import { createStatusView } from "./ui/status-view.js";
+import { collectDroppedFiles } from "./utils/drop-files.js";
 import { computeFallbackFilename } from "./utils/file.js";
 import { bytesToNice, formatMB } from "./utils/format.js";
 import { isHex } from "./utils/validation.js";
@@ -26,6 +28,8 @@ function getUiRefs() {
   return {
     dropzone: requireElement("dropzone"),
     fileInput: requireElement("fileInput"),
+    folderInput: requireElement("folderInput"),
+    folderSelectBtn: requireElement("folderSelectBtn"),
     fileCount: requireElement("fileCount"),
     totalSize: requireElement("totalSize"),
     processBtn: requireElement("processBtn"),
@@ -37,6 +41,7 @@ function getUiRefs() {
     paddingField: requireElement("paddingField"),
     removeBgToggle: document.getElementById("removeBg"),
     formatSelect: requireElement("formatSelect"),
+    filenameMode: requireElement("filenameMode"),
     sizeMode: requireElement("sizeMode"),
     sizeValue: requireElement("sizeValue"),
     sizeValueWrap: requireElement("sizeValueWrap"),
@@ -56,7 +61,7 @@ function getUiRefs() {
   };
 }
 
-(function bootstrap() {
+(async function bootstrap() {
   const LANGUAGE_STORAGE_KEY = "bulk-square-language";
   const THEME_STORAGE_KEY = "bulk-square-theme";
   const THUMB_DEBOUNCE_MS = 220;
@@ -65,12 +70,16 @@ function getUiRefs() {
   const MAX_THUMB_SIZE = 640;
 
   const ui = getUiRefs();
+  const runtimeConfig = await fetchRuntimeConfig();
+  const maxFilesPerBatch = runtimeConfig.maxFilesPerBatch || MAX_FILES_PER_BATCH;
   const initialLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY) || "es";
   const i18n = createI18n(initialLanguage);
   const store = createItemsStore();
   const statusView = createStatusView(ui.statusEl);
   const backgroundRemovalService = createBackgroundRemovalService();
-  const blobUploadService = createBlobUploadService({
+  const mediaSourceService = createMediaSourceService({
+    blobStorageEnabled: runtimeConfig.blobStorageEnabled,
+    storageProvider: runtimeConfig.storageProvider,
     getEffectiveFile: backgroundRemovalService.getEffectiveFile
   });
   const api = createProcessApi();
@@ -157,7 +166,7 @@ function getUiRefs() {
       statusView.setStatus(store.getItems().length ? t("toastItemRemoved") : t("toastListEmpty"));
 
       try {
-        await blobUploadService.cleanupItems([item]);
+        await mediaSourceService.cleanupItems([item]);
         item.sourceUpload = null;
         item.removeBgUpload = null;
       } catch (error) {
@@ -228,11 +237,13 @@ function getUiRefs() {
     }
 
     const downloadMode = ui.downloadMode.value || "separate";
+    const filenameMode = ui.filenameMode.value === "original" ? "original" : "processed";
     const shouldAutoClean = !!ui.autoClean.checked;
 
     return {
       color,
       format,
+      filenameMode,
       sizeMode,
       sizeValue,
       marginY,
@@ -249,7 +260,7 @@ function getUiRefs() {
     previewPlaceholder: ui.previewPlaceholder,
     getItems: store.getItems,
     getSettingsOrThrow,
-    getProcessSource: blobUploadService.ensureSourceUpload,
+    getProcessSource: mediaSourceService.ensureSource,
     fetchSingle: api.fetchSingle,
     t
   });
@@ -336,7 +347,7 @@ function getUiRefs() {
         if (item.processedThumbUrl && item.processedThumbKey === itemKey) continue;
 
         try {
-          const source = await blobUploadService.ensureSourceUpload(item, settings);
+          const source = await mediaSourceService.ensureSource(item, settings);
           const { blob } = await api.fetchSingle({
             source,
             color: settings.color,
@@ -422,11 +433,12 @@ function getUiRefs() {
 
     store.clear();
     ui.fileInput.value = "";
+    ui.folderInput.value = "";
     previewController.reset();
     refreshUi();
 
     try {
-      await blobUploadService.cleanupItems(itemsSnapshot);
+      await mediaSourceService.cleanupItems(itemsSnapshot);
       itemsSnapshot.forEach((item) => {
         item.sourceUpload = null;
         item.removeBgUpload = null;
@@ -440,22 +452,35 @@ function getUiRefs() {
   }
 
   function addFiles(fileList) {
-    const added = store.addFiles(fileList);
-    if (!added) return;
+    const result = store.addFiles(fileList, { maxFiles: maxFilesPerBatch });
+    if (!result.added) {
+      if (result.skippedLimit) statusView.setStatus(t("toastFileLimitReached", { max: maxFilesPerBatch }), "error");
+      else if (result.skippedUnsupported) statusView.setStatus(t("toastNoCompatibleImages"), "error");
+      return;
+    }
+
     refreshUi({ schedulePreview: true });
     scheduleThumbsUpdate();
-    statusView.setStatus(t("toastImagesAdded", { count: added }), "ok");
+
+    if (result.skippedLimit) {
+      statusView.setStatus(t("toastImagesAddedWithLimit", { count: result.added, max: maxFilesPerBatch }), "ok");
+    } else if (result.skippedUnsupported) {
+      statusView.setStatus(t("toastImagesAddedWithSkipped", { count: result.added, skipped: result.skippedUnsupported }), "ok");
+    } else {
+      statusView.setStatus(t("toastImagesAdded", { count: result.added }), "ok");
+    }
   }
 
   async function downloadZip(settings, zipMode, items) {
     const remoteFile = await api.createZipDownload({
       items,
-      getProcessSource: blobUploadService.ensureSourceUpload,
+      getProcessSource: mediaSourceService.ensureSource,
       onItemStart: (index, total) => {
         if (settings.removeBg) statusView.setStatus(t("toastRemovingBg", { current: index + 1, total }));
       },
       color: settings.color,
       format: settings.format,
+      filenameMode: settings.filenameMode,
       sizeMode: settings.sizeMode,
       sizeValue: settings.sizeValue,
       marginY: settings.marginY,
@@ -463,11 +488,16 @@ function getUiRefs() {
       removeBg: settings.removeBg
     });
 
+    if (remoteFile.blob) {
+      triggerDownload(remoteFile.blob, remoteFile.filename || "bulk-square-results.zip");
+      return;
+    }
+
     try {
-      const blob = await downloadBlobFromUrl(remoteFile.url, remoteFile.filename);
+      const blob = await downloadBlobFromUrl(remoteFile.url, remoteFile.filename, remoteFile.downloadUrl);
       triggerDownload(blob, remoteFile.filename || "bulk-square-results.zip");
     } finally {
-      await blobUploadService.cleanupUrls([remoteFile.url]);
+      if (remoteFile.url) await mediaSourceService.cleanupUrls([remoteFile.url]);
     }
   }
 
@@ -481,9 +511,10 @@ function getUiRefs() {
 
     const runOne = async (index) => {
       const result = await api.createSingleDownload({
-        source: await blobUploadService.ensureSourceUpload(items[index], settings),
+        source: await mediaSourceService.ensureSource(items[index], settings),
         color: settings.color,
         format: settings.format,
+        filenameMode: settings.filenameMode,
         sizeMode: settings.sizeMode,
         sizeValue: settings.sizeValue,
         marginY: settings.marginY,
@@ -517,17 +548,18 @@ function getUiRefs() {
       const filename = ready.filename || computeFallbackFilename(
         items[index].file,
         settings.format,
+        settings.filenameMode,
         index + 1,
         total,
         settings.marginY
       );
       try {
-        const blob = await downloadBlobFromUrl(ready.url, filename);
+        const blob = ready.blob || await downloadBlobFromUrl(ready.url, filename, ready.downloadUrl);
         triggerDownload(blob, filename);
         triggered += 1;
         statusView.setStatus(t("toastStartingDownload", { current: triggered, total }));
       } finally {
-        await blobUploadService.cleanupUrls([ready.url]);
+        if (ready.url) await mediaSourceService.cleanupUrls([ready.url]);
       }
 
       if (index > 0) {
@@ -542,9 +574,20 @@ function getUiRefs() {
       if (event.key === "Enter" || event.key === " ") ui.fileInput.click();
     });
 
+    ui.folderSelectBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      ui.folderInput.click();
+    });
+
     ui.fileInput.addEventListener("change", () => {
       addFiles(ui.fileInput.files);
       ui.fileInput.value = "";
+    });
+
+    ui.folderInput.addEventListener("change", () => {
+      addFiles(ui.folderInput.files);
+      ui.folderInput.value = "";
     });
 
     ["dragenter", "dragover"].forEach((evt) => {
@@ -563,9 +606,10 @@ function getUiRefs() {
       });
     });
 
-    ui.dropzone.addEventListener("drop", (event) => {
+    ui.dropzone.addEventListener("drop", async (event) => {
       const dt = event.dataTransfer;
-      if (dt && dt.files) addFiles(dt.files);
+      const files = await collectDroppedFiles(dt);
+      addFiles(files);
     });
   }
 

@@ -426,6 +426,12 @@ body::before {
   font-size: 14px;
 }
 
+.dropzone-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: -2px;
+}
+
 .media-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.05fr);

@@ -126,6 +126,17 @@
 
               <label class="field">
                 <span class="field-label tooltip-label">
+                  <span class="field-label-text" data-i18n="fieldFilenameMode">Nombre de archivo</span>
+                  <span class="tooltip-anchor" data-i18n-tooltip="fieldFilenameModeTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldFilenameMode" data-tooltip="Procesado agrega orden, tamaño y margen. Original conserva el nombre y solo cambia la extensión final." tabindex="0" aria-label="Más información sobre Nombre de archivo">i</span>
+                </span>
+                <select id="filenameMode" data-cselect>
+                  <option value="processed" selected data-i18n="optionFilenameProcessed">Procesado</option>
+                  <option value="original" data-i18n="optionFilenameOriginal">Original</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field-label tooltip-label">
                   <span class="field-label-text" data-i18n="fieldDownloadMode">Modo de descarga</span>
                   <span class="tooltip-anchor" data-i18n-tooltip="fieldDownloadModeTooltip" data-i18n-aria-label-template="tooltipMoreInfo" data-i18n-aria-label-param="fieldDownloadMode" data-tooltip="ZIP baja todo junto. Carpeta crea un ZIP con carpeta interna. Separado baja cada archivo por su cuenta." tabindex="0" aria-label="Más información sobre Modo de descarga">i</span>
                 </span>
@@ -238,12 +249,16 @@
         <section class="card media-zone" aria-label="Archivos" data-i18n-aria-label="filesAria">
 
           <div id="dropzone" class="dropzone" tabindex="0" role="button"
-            aria-label="Arrastra imágenes aquí o haz clic para seleccionar" data-i18n-aria-label="dropzoneAria">
+            aria-label="Arrastra imágenes o carpetas aquí, o haz clic para seleccionar" data-i18n-aria-label="dropzoneAria">
             <div class="dz-inner">
-              <div class="dz-title" data-i18n="dropzoneTitle">Arrastra imágenes aquí</div>
+              <div class="dz-title" data-i18n="dropzoneTitle">Arrastra imágenes o carpetas aquí</div>
               <div class="dz-sub" data-i18n="dropzoneSub">o haz clic para elegir archivos.</div>
             </div>
             <input id="fileInput" type="file" accept="image/*" multiple hidden />
+            <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
+          </div>
+          <div class="dropzone-actions">
+            <button id="folderSelectBtn" class="secondary ghost" type="button" data-i18n="selectFolder">Elegir carpeta</button>
           </div>
 
           <div class="media-grid">

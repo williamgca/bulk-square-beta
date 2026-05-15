@@ -12,7 +12,17 @@ export function triggerDownload(blob, filename) {
   }, 10 * 60 * 1000);
 }
 
-export async function downloadBlobFromUrl(url, filename) {
+export async function downloadBlobFromUrl(url, filename, directUrl = "") {
+  if (directUrl) {
+    try {
+      const directResponse = await fetch(directUrl);
+      if (directResponse.ok) return directResponse.blob();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn("Direct storage download failed; falling back to backend proxy.", error);
+    }
+  }
+
   const downloadUrl = `/api/blob/download?url=${encodeURIComponent(url)}${filename ? `&filename=${encodeURIComponent(filename)}` : ""}`;
   const response = await fetch(downloadUrl);
   if (!response.ok) {

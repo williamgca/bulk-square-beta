@@ -1,9 +1,15 @@
 import { Readable } from "node:stream";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { Request, Response } from "express";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { HttpError } from "../errors/http-error";
-import { assertBlobConfigured, deleteBlobUrls, getPrivateBlobStream } from "../services/blob-storage.service";
+import { assertBlobConfigured } from "../services/blob-storage.service";
+import {
+  createRemoteUploadToken,
+  deleteRemoteObjects,
+  getRemoteObject,
+  getRemoteStorageProvider
+} from "../services/media-storage.service";
+import { attachmentContentDisposition } from "../utils/http";
 
 const BLOB_UPLOAD_PREFIX = "bulk-square/uploads/";
 const MAX_BLOB_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
@@ -41,8 +47,35 @@ function validateUploadPathname(pathname: string): void {
   }
 }
 
+function parseSupabaseUploadPathname(body: Record<string, unknown>): string {
+  const pathname = String(body.pathname || "").trim();
+  if (!pathname) {
+    throw new HttpError("Missing upload pathname.", 400);
+  }
+
+  validateUploadPathname(pathname);
+
+  const contentType = String(body.contentType || "").trim().toLowerCase();
+  if (contentType && !contentType.startsWith("image/")) {
+    throw new HttpError("Invalid upload content type.", 400);
+  }
+
+  const size = Number(body.size);
+  if (Number.isFinite(size) && size > MAX_BLOB_UPLOAD_SIZE_BYTES) {
+    throw new HttpError("Image is too large.", 400);
+  }
+
+  return pathname;
+}
+
 export async function blobUploadController(req: Request, res: Response): Promise<Response> {
   try {
+    if (getRemoteStorageProvider() === "supabase") {
+      const pathname = parseSupabaseUploadPathname(asBody(req.body));
+      const token = await createRemoteUploadToken(pathname);
+      return res.status(200).json(token);
+    }
+
     assertBlobConfigured();
 
     const body = req.body as HandleUploadBody | undefined;
@@ -75,7 +108,7 @@ export async function blobUploadController(req: Request, res: Response): Promise
 export async function blobCleanupController(req: Request, res: Response): Promise<Response> {
   try {
     const urls = parseCleanupUrls(asBody(req.body));
-    const deleted = await deleteBlobUrls(urls);
+    const deleted = await deleteRemoteObjects(urls);
     return res.status(200).json({ ok: true, deleted });
   } catch (err) {
     return respondError(err, res);
@@ -89,19 +122,20 @@ export async function blobDownloadController(req: Request, res: Response): Promi
       return res.status(400).json({ error: "Missing blob url." });
     }
 
-    const filename = String(req.query.filename || "").trim();
-    const blob = await getPrivateBlobStream(blobUrl);
+    const filenameValue = Array.isArray(req.query.filename) ? req.query.filename[0] : req.query.filename;
+    const filename = typeof filenameValue === "string" ? filenameValue : "";
+    const object = await getRemoteObject(blobUrl);
 
     res.status(200);
-    res.setHeader("Content-Type", blob.contentType || "application/octet-stream");
+    res.setHeader("Content-Type", object.contentType || "application/octet-stream");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "private, no-cache");
-    res.setHeader("ETag", blob.etag);
+    if (object.etag) res.setHeader("ETag", object.etag);
     if (filename) {
-      res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"`);
+      res.setHeader("Content-Disposition", attachmentContentDisposition(filename));
     }
 
-    Readable.fromWeb(blob.stream as unknown as NodeReadableStream).pipe(res);
+    Readable.from(object.body).pipe(res);
   } catch (err) {
     return respondError(err, res);
   }

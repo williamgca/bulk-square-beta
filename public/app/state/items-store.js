@@ -1,3 +1,7 @@
+import { MAX_FILES_PER_BATCH } from "../config.js";
+
+const COMPATIBLE_IMAGE_EXTENSION_RE = /\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|svg|tif|tiff|webp)$/i;
+
 function createUidGenerator() {
   let seq = 0;
 
@@ -8,6 +12,12 @@ function createUidGenerator() {
   };
 }
 
+function isCompatibleImageFile(file) {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  return COMPATIBLE_IMAGE_EXTENSION_RE.test(file.name || "");
+}
+
 export function createItemsStore() {
   const uid = createUidGenerator();
   let items = [];
@@ -16,9 +26,11 @@ export function createItemsStore() {
     return items;
   }
 
-  function addFiles(fileList) {
-    const incoming = Array.from(fileList || []).filter((file) => file && file.type && file.type.startsWith("image/"));
-    if (!incoming.length) return 0;
+  function addFiles(fileList, { maxFiles = MAX_FILES_PER_BATCH } = {}) {
+    const candidates = Array.from(fileList || []).filter(Boolean);
+    const compatible = candidates.filter(isCompatibleImageFile);
+    const remainingSlots = Math.max(0, maxFiles - items.length);
+    const incoming = compatible.slice(0, remainingSlots);
 
     const mapped = incoming.map((file) => ({
       id: uid(),
@@ -35,7 +47,11 @@ export function createItemsStore() {
     }));
 
     items = items.concat(mapped);
-    return mapped.length;
+    return {
+      added: mapped.length,
+      skippedUnsupported: candidates.length - compatible.length,
+      skippedLimit: Math.max(0, compatible.length - incoming.length)
+    };
   }
 
   function removeAt(index) {

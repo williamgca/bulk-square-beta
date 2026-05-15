@@ -37,6 +37,7 @@ async function extractError(response) {
   try {
     const data = await response.json();
     if (data && data.error) message = data.error;
+    else if (data && data.message) message = data.message;
   } catch {
     // ignore
   }
@@ -68,6 +69,47 @@ function getUploadKeys(settings) {
   };
 }
 
+async function createSignedUpload(pathname, file) {
+  const response = await fetch("/api/blob/upload", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      pathname,
+      contentType: file && file.type ? file.type : "",
+      size: file && Number.isFinite(file.size) ? file.size : 0
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractError(response));
+  }
+
+  return response.json();
+}
+
+async function uploadToSignedUrl(uploadInfo, file) {
+  const formData = new FormData();
+  formData.append("cacheControl", "60");
+  formData.append("", file);
+
+  const response = await fetch(uploadInfo.signedUrl, {
+    method: "PUT",
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(await extractError(response));
+  }
+
+  return {
+    url: uploadInfo.url || uploadInfo.path,
+    pathname: uploadInfo.path,
+    contentType: file.type || ""
+  };
+}
+
 function getItemCleanupUrls(item) {
   return [item.sourceUpload && item.sourceUpload.url, item.removeBgUpload && item.removeBgUpload.url].filter(Boolean);
 }
@@ -84,25 +126,30 @@ async function waitForPendingUploads(items) {
   await Promise.allSettled(pending);
 }
 
-export function createBlobUploadService({ getEffectiveFile }) {
+export function createBlobUploadService({ getEffectiveFile, storageProvider = "supabase" }) {
   async function ensureSourceUpload(item, settings) {
     const { uploadKey, promiseKey, variant } = getUploadKeys(settings);
     if (item[uploadKey] && item[uploadKey].url) return item[uploadKey];
     if (item[promiseKey]) return item[promiseKey];
 
     item[promiseKey] = (async () => {
-      const upload = await getUploadFn();
       const file = await getEffectiveFile(item, settings);
-      const blob = await upload(buildBlobPathname(file, item.id, variant), file, {
-        access: "private",
-        handleUploadUrl: "/api/blob/upload",
-        multipart: file.size >= MULTIPART_UPLOAD_THRESHOLD_BYTES
-      });
+      const pathname = buildBlobPathname(file, item.id, variant);
+      const blob = storageProvider === "supabase"
+        ? await uploadToSignedUrl(await createSignedUpload(pathname, file), file)
+        : await (async () => {
+          const upload = await getUploadFn();
+          return upload(pathname, file, {
+            access: "private",
+            handleUploadUrl: "/api/blob/upload",
+            multipart: file.size >= MULTIPART_UPLOAD_THRESHOLD_BYTES
+          });
+        })();
 
       const uploadedSource = {
         url: blob.url,
         pathname: blob.pathname,
-        originalName: file.name,
+        originalName: item.file && item.file.name ? item.file.name : file.name,
         contentType: blob.contentType
       };
 

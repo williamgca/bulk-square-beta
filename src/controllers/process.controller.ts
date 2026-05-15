@@ -1,15 +1,16 @@
 import { Request, Response } from "express";
 import archiver from "archiver";
+import { MAX_FILES_PER_BATCH } from "../config/process";
 import { HttpError } from "../errors/http-error";
 import { processOneImage } from "../services/image-processor.service";
 import {
-  createPrivateDownloadUploadStream,
-  downloadPrivateBlobToBuffer,
-  uploadPrivateDownloadBuffer
-} from "../services/blob-storage.service";
+  createRemoteDownloadUploadStream,
+  downloadRemoteObjectToBuffer,
+  uploadRemoteDownloadBuffer
+} from "../services/media-storage.service";
 import { parseBatchOptions, parseBatchSources, parseSingleOptions, parseSingleSource } from "../services/process-request.service";
-import { extractClientOrderMarker, sanitizeBaseName } from "../utils/file-name";
-import { outContentType } from "../utils/http";
+import { extractClientOrderMarker, replaceFinalExtension, sanitizeBaseName } from "../utils/file-name";
+import { attachmentContentDisposition, outContentType } from "../utils/http";
 import { BlobProcessSource } from "../types/process";
 
 function asBody(input: unknown): Record<string, unknown> {
@@ -44,12 +45,27 @@ function getResponseMode(body: Record<string, unknown>): "inline" | "blob" {
   return value === "blob" ? "blob" : "inline";
 }
 
+function createProcessedFilename(
+  cleanName: string,
+  order: number,
+  orderTotal: number,
+  squareSize: number,
+  marginY: number,
+  outExt: string
+): string {
+  const padLen = String(orderTotal).length;
+  const baseName = sanitizeBaseName(cleanName);
+  const orderPrefix = String(order).padStart(padLen, "0");
+  const marginSuffix = marginY > 0 ? `_my${marginY}` : "";
+  return `${orderPrefix}_${baseName}_square_${squareSize}${marginSuffix}.${outExt}`;
+}
+
 function toBatchInputDescriptor(source: BlobProcessSource, index: number): BatchInputDescriptor {
   return {
     index,
     order: index + 1,
     cleanName: source.originalName,
-    getBuffer: async () => downloadPrivateBlobToBuffer(source.blobUrl)
+    getBuffer: async () => downloadRemoteObjectToBuffer(source.blobUrl)
   };
 }
 
@@ -87,7 +103,7 @@ function resolveSingleInput(req: Request): SingleInputDescriptor {
   const source = parseSingleSource(asBody(req.body));
   return {
     cleanName: source.originalName,
-    getBuffer: async () => downloadPrivateBlobToBuffer(source.blobUrl)
+    getBuffer: async () => downloadRemoteObjectToBuffer(source.blobUrl)
   };
 }
 
@@ -97,6 +113,9 @@ export async function processBatchController(req: Request, res: Response): Promi
     const orderedFiles = resolveBatchInputs(req);
     if (orderedFiles.length === 0) {
       return res.status(400).json({ error: "No images provided." });
+    }
+    if (orderedFiles.length > MAX_FILES_PER_BATCH) {
+      return res.status(400).json({ error: `Too many images. Maximum is ${MAX_FILES_PER_BATCH}.` });
     }
 
     const options = parseBatchOptions(body);
@@ -134,7 +153,7 @@ export async function processBatchController(req: Request, res: Response): Promi
     });
 
     if (shouldReturnBlobReference) {
-      archiveUpload = createPrivateDownloadUploadStream(filename, "application/zip");
+      archiveUpload = createRemoteDownloadUploadStream(filename, "application/zip");
       archive.pipe(archiveUpload.stream);
     } else {
       archive.pipe(res);
@@ -142,8 +161,6 @@ export async function processBatchController(req: Request, res: Response): Promi
 
     const zipGeneratedAt = new Date();
     const folderPrefix = options.downloadMode === "folder" ? "bulk-square-results/" : "";
-
-    const padLen = String(orderedFiles.length).length;
 
     for (let i = 0; i < orderedFiles.length; i++) {
       const { cleanName, getBuffer } = orderedFiles[i];
@@ -153,10 +170,10 @@ export async function processBatchController(req: Request, res: Response): Promi
         ...options
       });
 
-      const baseName = sanitizeBaseName(cleanName);
-      const orderPrefix = String(i + 1).padStart(padLen, "0");
-      const marginSuffix = options.marginY > 0 ? `_my${options.marginY}` : "";
-      const outName = `${folderPrefix}${orderPrefix}_${baseName}_square_${squareSize}${marginSuffix}.${outExt}`;
+      const filename = options.filenameMode === "original"
+        ? replaceFinalExtension(cleanName, outExt)
+        : createProcessedFilename(cleanName, i + 1, orderedFiles.length, squareSize, options.marginY, outExt);
+      const outName = `${folderPrefix}${filename}`;
       archive.append(outputBuffer, { name: outName, date: zipGeneratedAt });
     }
 
@@ -180,7 +197,6 @@ export async function processSingleController(req: Request, res: Response): Prom
     }
 
     const options = parseSingleOptions(body);
-    const padLen = String(options.orderTotal).length;
     const { cleanName, getBuffer } = resolveSingleInput(req);
     const input = await getBuffer();
 
@@ -189,14 +205,13 @@ export async function processSingleController(req: Request, res: Response): Prom
       ...options
     });
 
-    const baseName = sanitizeBaseName(cleanName);
-    const orderPrefix = String(options.order).padStart(padLen, "0");
-    const marginSuffix = options.marginY > 0 ? `_my${options.marginY}` : "";
-    const outName = `${orderPrefix}_${baseName}_square_${squareSize}${marginSuffix}.${outExt}`;
+    const outName = options.filenameMode === "original"
+      ? replaceFinalExtension(cleanName, outExt)
+      : createProcessedFilename(cleanName, options.order, options.orderTotal, squareSize, options.marginY, outExt);
     const responseMode = getResponseMode(body);
 
     if (responseMode === "blob") {
-      const uploaded = await uploadPrivateDownloadBuffer(
+      const uploaded = await uploadRemoteDownloadBuffer(
         outName,
         outputBuffer,
         outContentType(options.format)
@@ -208,7 +223,7 @@ export async function processSingleController(req: Request, res: Response): Prom
     res.status(200);
     res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
     res.setHeader("Content-Type", outContentType(options.format));
-    res.setHeader("Content-Disposition", `attachment; filename="${outName}"`);
+    res.setHeader("Content-Disposition", attachmentContentDisposition(outName));
     res.send(outputBuffer);
   } catch (err) {
     return respondError(err, res);
